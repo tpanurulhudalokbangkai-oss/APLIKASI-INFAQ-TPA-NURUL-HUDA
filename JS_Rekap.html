@@ -1,442 +1,508 @@
-/**
- * Rekap.gs
- * Rekap pembayaran dan rekap tunggakan.
- * Fungsi inti (hitung...) sengaja dibuat terpisah dari fungsi publik supaya bisa dipakai ulang
- * oleh rekap tahunan, ekspor Excel/PDF, dan pesan WhatsApp pada tahap berikutnya.
- */
+<style>
+  /* Tahap 7: gaya rekap */
+  .th-urut { background: none; border: 0; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0; white-space: nowrap; }
+  .th-urut:hover { text-decoration: underline; }
+  .tabel tfoot td { font-weight: 700; background: #F3F7F5; border-top: 2px solid var(--hijau-tua); }
+  .filter-item label { margin: 0 0 4px; font-size: 12px; color: var(--abu); font-weight: 600; }
+  .filter-centang { display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 18px 0 0; font-weight: 600; color: var(--hijau-tua); }
+  .filter-centang input { width: 20px; height: 20px; }
+  .daftar-aturan { margin: 8px 0 0; padding-left: 20px; font-size: 13px; color: var(--abu); }
+  .daftar-aturan li { margin-bottom: 4px; }
+  .teks-bulan { min-width: 220px; }
+  .lencana-kecil { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #ECEFED; color: var(--abu); font-size: 11px; font-weight: 700; }
+</style>
 
-/* ======================== PEMBANTU WAKTU ======================== */
+<script>
+  /* =========================================================
+     JS_Rekap.html - Tahap 7
+     Halaman Rekap Pembayaran dan Rekap Tunggakan,
+     serta dialog Nonaktifkan Santri dengan tanggal berhenti.
+     ========================================================= */
 
-function indeksBulan_(tahun, bulan) {
-  return tahun * 12 + bulan;
-}
-
-function dariIndeks_(idx) {
-  var tahun = Math.floor((idx - 1) / 12);
-  return { tahun: tahun, bulan: idx - tahun * 12 };
-}
-
-function waktuSekarang_() {
-  var zona = APP_CONFIG.ZONA_WAKTU;
-  var sekarang = new Date();
-  return {
-    tahun: Number(Utilities.formatDate(sekarang, zona, 'yyyy')),
-    bulan: Number(Utilities.formatDate(sekarang, zona, 'M'))
-  };
-}
-
-/* ======================== MESIN PERHITUNGAN TUNGGAKAN ======================== */
-
-/**
- * Menghitung bulan tertunggak SATU santri. FUNGSI MURNI: tidak membaca spreadsheet,
- * sehingga aturannya mudah diuji (lihat ujiPerhitunganTunggakan).
- *
- * p.awalIdx        indeks bulan awal penagihan (periode nominal paling awal)
- * p.masukIdx       indeks bulan masuk santri, atau null bila tidak diketahui
- * p.berhentiIdx    indeks bulan terakhir yang masih ditagih (santri nonaktif), atau null bila aktif
- * p.akhirIdx       indeks bulan terakhir yang dihitung
- * p.dibayar        objek {indeks: true} untuk bulan yang sudah dibayar (transaksi sah)
- * p.bebas          daftar {dari, sampai} berisi indeks bulan yang dibebaskan
- * p.riwayatNominal daftar {tahun, bulan, nominal}
- */
-function hitungTunggakanSantri_(p) {
-  var mulai = p.awalIdx;
-  if (p.masukIdx !== null && p.masukIdx > mulai) { mulai = p.masukIdx; }
-  var selesai = p.akhirIdx;
-  if (p.berhentiIdx !== null && p.berhentiIdx < selesai) { selesai = p.berhentiIdx; }
-
-  var hasil = { bulan: [], jumlah: 0, total: 0 };
-  for (var idx = mulai; idx <= selesai; idx++) {
-    if (p.dibayar[idx]) { continue; }
-    var dibebaskan = p.bebas.some(function (b) { return idx >= b.dari && idx <= b.sampai; });
-    if (dibebaskan) { continue; }
-
-    var w = dariIndeks_(idx);
-    var nominal = nominalBerlaku_(p.riwayatNominal, w.bulan, w.tahun);
-    hasil.bulan.push({ tahun: w.tahun, bulan: w.bulan, nominal: nominal });
-    hasil.jumlah++;
-    hasil.total += nominal;
+  /* =================== PEMBANTU =================== */
+  function buatFilter(label, kontrol) {
+    var wadah = el('div', 'filter-item');
+    var lb = el('label', null, label);
+    if (kontrol.id) { lb.setAttribute('for', kontrol.id); }
+    wadah.appendChild(lb);
+    wadah.appendChild(kontrol);
+    return wadah;
   }
-  return hasil;
-}
 
-/**
- * Membaca filter rekap dan memaksa cakupan sesuai peran.
- * Petugas SELALU dibatasi pada kelompoknya sendiri, apa pun yang dikirim browser.
- */
-function normalisasiFilterRekap_(profil, filter, untukTunggakan) {
-  filter = (filter && typeof filter === 'object') ? filter : {};
-  var sekarang = waktuSekarang_();
-  var kosong = function (v) { return v === undefined || v === null || v === ''; };
-
-  var f = {
-    idKelompok: profil.role === ROLE_ADMIN ? bersihkanTeks_(filter.idKelompok) : profil.idKelompok,
-    kata: bersihkanTeks_(filter.kata).substring(0, 60).toLowerCase()
-  };
-
-  if (untukTunggakan) {
-    f.tahun = kosong(filter.tahun) ? sekarang.tahun : keBilanganBulat_(filter.tahun, 'Tahun', 2000, sekarang.tahun + 1);
-    f.bulan = kosong(filter.bulan) ? sekarang.bulan : keBilanganBulat_(filter.bulan, 'Bulan', 1, 12);
-    var status = String(filter.status || 'SEMUA').toUpperCase();
-    f.status = (status === 'AKTIF' || status === 'NONAKTIF') ? status : 'SEMUA';
-    f.hanyaMenunggak = filter.hanyaMenunggak !== false;
-  } else {
-    f.tahun = kosong(filter.tahun) ? sekarang.tahun : keBilanganBulat_(filter.tahun, 'Tahun', 0, 2100);
-    if (f.tahun !== 0 && f.tahun < 2000) {
-      throw buatGalat_('DATA_TIDAK_VALID', 'Tahun tidak valid.');
-    }
-    f.bulan = kosong(filter.bulan) ? 0 : keBilanganBulat_(filter.bulan, 'Bulan', 0, 12);
-  }
-  return f;
-}
-
-function daftarKelompokCakupan_(profil) {
-  var peta = petaKelompok_();
-  return Object.keys(peta)
-    .map(function (id) { return peta[id]; })
-    .filter(function (k) { return profil.role === ROLE_ADMIN || k.id === profil.idKelompok; })
-    .sort(function (a, b) { return a.nama.localeCompare(b.nama, 'id'); });
-}
-
-/* ======================== REKAP PEMBAYARAN ======================== */
-
-/**
- * Mengumpulkan pembayaran SAH sesuai filter dan cakupan peran.
- */
-function hitungRekapPembayaran_(profil, f) {
-  var adalahAdmin = profil.role === ROLE_ADMIN;
-  var petaKel = petaKelompok_();
-  var nisSantri = {};
-  bacaTabel_('SANTRI').forEach(function (s) { nisSantri[String(s.ID_SANTRI).trim()] = String(s.NIS).trim(); });
-
-  var setTahun = {};
-  setTahun[waktuSekarang_().tahun] = true;
-  var baris = [];
-  var total = 0;
-
-  bacaTabel_('PEMBAYARAN').forEach(function (p) {
-    if (!String(p.ID_PEMBAYARAN).trim() || !transaksiSah_(p)) { return; }
-    var idKel = String(p.ID_KELOMPOK).trim();
-    if (!adalahAdmin && idKel !== profil.idKelompok) { return; }
-
-    var th = Number(p.TAHUN);
-    var bl = Number(p.BULAN);
-    if (th > 0) { setTahun[th] = true; }
-
-    if (f.tahun !== 0 && th !== f.tahun) { return; }
-    if (f.bulan !== 0 && bl !== f.bulan) { return; }
-    if (f.idKelompok && idKel !== f.idKelompok) { return; }
-
-    var idSantri = String(p.ID_SANTRI).trim();
-    var nama = String(p.NAMA_SANTRI).trim();
-    var nis = nisSantri[idSantri] || '';
-    if (f.kata && (nama + ' ' + nis).toLowerCase().indexOf(f.kata) < 0) { return; }
-
-    var nominal = Number(p.NOMINAL) || 0;
-    total += nominal;
-    baris.push({
-      idPembayaran: String(p.ID_PEMBAYARAN).trim(),
-      nis: nis,
-      nama: nama,
-      idKelompok: idKel,
-      namaKelompok: petaKel[idKel] ? petaKel[idKel].nama : idKel,
-      bulan: bl,
-      tahun: th,
-      tanggal: formatTanggalIso_(p.TANGGAL_BAYAR),
-      nominal: nominal,
-      penerima: String(p.PENERIMA).trim()
+  /* Mengurutkan salinan daftar berdasarkan kunci urut dan arah. */
+  function urutkanDaftar(daftar, urut, pengambil) {
+    if (!urut.kunci || !pengambil[urut.kunci]) { return daftar; }
+    var arah = urut.arah === 'desc' ? -1 : 1;
+    return daftar.slice().sort(function (a, b) {
+      var x = pengambil[urut.kunci](a);
+      var y = pengambil[urut.kunci](b);
+      var hasil;
+      if (typeof x === 'number' && typeof y === 'number') { hasil = x - y; }
+      else { hasil = String(x).localeCompare(String(y), 'id', { numeric: true }); }
+      return hasil * arah;
     });
-  });
-
-  baris.sort(function (a, b) {
-    var k = a.namaKelompok.localeCompare(b.namaKelompok, 'id');
-    if (k !== 0) { return k; }
-    var n = a.nama.localeCompare(b.nama, 'id');
-    if (n !== 0) { return n; }
-    return (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan);
-  });
-
-  return {
-    baris: baris,
-    total: total,
-    jumlah: baris.length,
-    tahunTersedia: Object.keys(setTahun).map(Number).sort(function (a, b) { return b - a; }),
-    kelompok: daftarKelompokCakupan_(profil)
-  };
-}
-
-/**
- * Admin: semua kelompok. Petugas: hanya kelompoknya.
- */
-function ambilRekapPembayaran(token, filter) {
-  try {
-    var profil = wajibLogin_(token);
-    var f = normalisasiFilterRekap_(profil, filter, false);
-    return { berhasil: true, data: hitungRekapPembayaran_(profil, f) };
-  } catch (err) {
-    return galatKeRespons_(err);
-  }
-}
-
-/* ======================== REKAP TUNGGAKAN ======================== */
-
-/**
- * Menghitung tunggakan seluruh santri dalam cakupan, dengan semua aturan perhitungan.
- */
-function hitungTunggakan_(profil, f) {
-  var adalahAdmin = profil.role === ROLE_ADMIN;
-  var riwayatNominal = bacaRiwayatNominal_();
-  var hasil = {
-    baris: [],
-    awalPenagihan: null,
-    akhirHitung: { bulan: f.bulan, tahun: f.tahun },
-    tanpaNominal: riwayatNominal.length === 0,
-    tanpaTanggalBerhenti: 0,
-    kelompok: daftarKelompokCakupan_(profil)
-  };
-  if (!riwayatNominal.length) {
-    return hasil;
   }
 
-  var awal = riwayatNominal[0];
-  var awalIdx = indeksBulan_(awal.tahun, awal.bulan);
-  var akhirIdx = indeksBulan_(f.tahun, f.bulan);
-  hasil.awalPenagihan = { bulan: awal.bulan, tahun: awal.tahun };
+  /*
+   * Tabel dengan judul kolom yang bisa diklik untuk mengurutkan.
+   * kolom: [{ judul, kunci (boleh kosong), angka (true/false), isi: function (baris, nomor) }]
+   */
+  function buatTabelUrut(kolom, daftar, urut, onUrut) {
+    var gulir = el('div', 'tabel-gulir');
+    var tabel = el('table', 'tabel lebar');
 
-  var petaKel = petaKelompok_();
-
-  // Pembayaran sah per santri (transaksi DIBATALKAN tidak dihitung)
-  var dibayar = {};
-  bacaTabel_('PEMBAYARAN').forEach(function (p) {
-    if (!String(p.ID_PEMBAYARAN).trim() || !transaksiSah_(p)) { return; }
-    var bl = Number(p.BULAN);
-    var th = Number(p.TAHUN);
-    if (!(bl >= 1 && bl <= 12) || !(th >= 2000)) { return; }
-    var id = String(p.ID_SANTRI).trim();
-    if (!dibayar[id]) { dibayar[id] = {}; }
-    dibayar[id][indeksBulan_(th, bl)] = true;
-  });
-
-  // Pembebasan: ID_SANTRI kosong atau SEMUA berlaku untuk semua santri
-  var bebasUmum = [];
-  var bebasSantri = {};
-  bacaTabel_('PEMBEBASAN').forEach(function (r) {
-    if (!adalahAktif_(r.STATUS_AKTIF)) { return; }
-    var dari = indeksBulanDariTanggal_(r.DARI);
-    if (dari === null) { return; }
-    var sampai = indeksBulanDariTanggal_(r.SAMPAI);
-    if (sampai === null) { sampai = dari; }
-    var rentang = { dari: dari, sampai: sampai };
-    var idS = String(r.ID_SANTRI).trim();
-    if (!idS || idS.toUpperCase() === 'SEMUA') {
-      bebasUmum.push(rentang);
-    } else {
-      if (!bebasSantri[idS]) { bebasSantri[idS] = []; }
-      bebasSantri[idS].push(rentang);
-    }
-  });
-
-  bacaTabel_('SANTRI').forEach(function (s) {
-    var id = String(s.ID_SANTRI).trim();
-    if (!id) { return; }
-    var idKel = String(s.ID_KELOMPOK).trim();
-    if (!adalahAdmin && idKel !== profil.idKelompok) { return; }
-    if (f.idKelompok && idKel !== f.idKelompok) { return; }
-
-    var aktif = adalahAktif_(s.STATUS_AKTIF);
-    if (f.status === 'AKTIF' && !aktif) { return; }
-    if (f.status === 'NONAKTIF' && aktif) { return; }
-
-    var berhentiIdx = null;
-    if (!aktif) {
-      berhentiIdx = indeksBulanDariTanggal_(s.TANGGAL_NONAKTIF);
-      if (berhentiIdx === null) {
-        // Nonaktif tetapi tanggal berhenti tidak tercatat: tidak dapat dihitung
-        hasil.tanpaTanggalBerhenti++;
-        return;
+    var kepala = el('thead');
+    var barisKepala = el('tr');
+    kolom.forEach(function (k) {
+      var th = el('th', k.angka ? 'angka' : null);
+      if (k.kunci) {
+        var tanda = urut.kunci === k.kunci ? (urut.arah === 'desc' ? ' \u25BC' : ' \u25B2') : '';
+        var tombol = el('button', 'th-urut', k.judul + tanda);
+        tombol.type = 'button';
+        tombol.setAttribute('aria-label', 'Urutkan menurut ' + k.judul);
+        tombol.addEventListener('click', function () {
+          if (urut.kunci === k.kunci) { urut.arah = urut.arah === 'asc' ? 'desc' : 'asc'; }
+          else { urut.kunci = k.kunci; urut.arah = 'asc'; }
+          onUrut();
+        });
+        th.appendChild(tombol);
+      } else {
+        th.textContent = k.judul;
       }
+      barisKepala.appendChild(th);
+    });
+    kepala.appendChild(barisKepala);
+    tabel.appendChild(kepala);
+
+    var badan = el('tbody');
+    daftar.forEach(function (baris, nomor) {
+      var tr = el('tr');
+      kolom.forEach(function (k) {
+        var td = el('td', k.angka ? 'angka' : null);
+        var isi = k.isi(baris, nomor);
+        if (isi && isi.nodeType) { td.appendChild(isi); }
+        else { td.textContent = (isi === null || isi === undefined) ? '' : String(isi); }
+        tr.appendChild(td);
+      });
+      badan.appendChild(tr);
+    });
+    tabel.appendChild(badan);
+    gulir.appendChild(tabel);
+    return gulir;
+  }
+
+  /* Menambah baris TOTAL di bawah tabel. */
+  function tambahBarisTotal(gulir, jumlahKolom, labelTotal, teksTotal, kolomLabel) {
+    var tfoot = el('tfoot');
+    var tr = el('tr');
+    var tdLabel = el('td', null, labelTotal);
+    tdLabel.colSpan = kolomLabel;
+    tr.appendChild(tdLabel);
+    var tdNilai = el('td', 'angka', teksTotal);
+    tr.appendChild(tdNilai);
+    var sisa = jumlahKolom - kolomLabel - 1;
+    if (sisa > 0) {
+      var tdSisa = el('td', null, '');
+      tdSisa.colSpan = sisa;
+      tr.appendChild(tdSisa);
+    }
+    tfoot.appendChild(tr);
+    gulir.querySelector('table').appendChild(tfoot);
+  }
+
+  /* =================== REKAP PEMBAYARAN =================== */
+  var DATA_REKAP = { baris: [], total: 0, tahunTersedia: [], kelompok: [], siap: false };
+  var FILTER_REKAP = { tahun: 0, bulan: 0, idKelompok: '', kata: '' };
+  var URUT_REKAP = { kunci: null, arah: 'asc' };
+
+  var PENGAMBIL_REKAP = {
+    nis: function (r) { return r.nis; },
+    nama: function (r) { return r.nama; },
+    kelompok: function (r) { return r.namaKelompok; },
+    bulan: function (r) { return r.bulan; },
+    tahun: function (r) { return r.tahun; },
+    tanggal: function (r) { return r.tanggal; },
+    nominal: function (r) { return r.nominal; },
+    penerima: function (r) { return r.penerima; }
+  };
+
+  function renderRekap(item) {
+    var admin = STATE.pengguna.role === 'ADMIN';
+    var tahunIni = new Date().getFullYear();
+    FILTER_REKAP = { tahun: tahunIni, bulan: 0, idKelompok: '', kata: '' };
+    URUT_REKAP = { kunci: null, arah: 'asc' };
+    DATA_REKAP = { baris: [], total: 0, tahunTersedia: [], kelompok: [], siap: false };
+
+    buatKepala(item.label, null, null);
+
+    var bar = el('div', 'toolbar');
+
+    var pilTahun = buatSelect('rekapTahun', [{ nilai: String(tahunIni), label: 'Tahun ' + tahunIni }], String(tahunIni));
+    pilTahun.addEventListener('change', function () { FILTER_REKAP.tahun = Number(pilTahun.value); muatRekap(); });
+
+    var opsiBulan = [{ nilai: '0', label: 'Semua bulan' }];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+    var pilBulan = buatSelect('rekapBulan', opsiBulan, '0');
+    pilBulan.addEventListener('change', function () { FILTER_REKAP.bulan = Number(pilBulan.value); muatRekap(); });
+
+    var pilKel = buatSelect('rekapKelompok', [{ nilai: '', label: 'Semua kelompok' }], '');
+    pilKel.addEventListener('change', function () { FILTER_REKAP.idKelompok = pilKel.value; muatRekap(); });
+
+    var cari = buatInput('rekapCari', 'text', '', 60);
+    cari.placeholder = 'Cari nama santri atau NIS...';
+    cari.addEventListener('input', function () { FILTER_REKAP.kata = cari.value; gambarRekap(); });
+
+    bar.appendChild(buatFilter('Tahun', pilTahun));
+    bar.appendChild(buatFilter('Bulan', pilBulan));
+    if (admin) { bar.appendChild(buatFilter('Kelompok', pilKel)); }
+    bar.appendChild(buatFilter('Cari', cari));
+    $('isiHalaman').appendChild(bar);
+
+    siapkanWadah();
+    muatRekap();
+  }
+
+  function muatRekap() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_REKAP.siap = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilRekapPembayaran', [{ tahun: FILTER_REKAP.tahun, bulan: FILTER_REKAP.bulan, idKelompok: FILTER_REKAP.idKelompok }], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'rekap') { return; }
+      DATA_REKAP = res.data;
+      DATA_REKAP.siap = true;
+      isiFilterRekap();
+      gambarRekap();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'rekap') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatRekap);
+    });
+  }
+
+  function isiFilterRekap() {
+    var pilTahun = $('rekapTahun');
+    pilTahun.innerHTML = '';
+    var semua = el('option', null, 'Semua tahun');
+    semua.value = '0';
+    pilTahun.appendChild(semua);
+    DATA_REKAP.tahunTersedia.forEach(function (t) {
+      var op = el('option', null, String(t));
+      op.value = String(t);
+      pilTahun.appendChild(op);
+    });
+    pilTahun.value = String(FILTER_REKAP.tahun);
+
+    var pilKel = $('rekapKelompok');
+    if (pilKel) {
+      pilKel.innerHTML = '';
+      var semuaKel = el('option', null, 'Semua kelompok');
+      semuaKel.value = '';
+      pilKel.appendChild(semuaKel);
+      DATA_REKAP.kelompok.forEach(function (k) {
+        var op = el('option', null, k.nama);
+        op.value = k.id;
+        pilKel.appendChild(op);
+      });
+      pilKel.value = FILTER_REKAP.idKelompok;
+    }
+  }
+
+  function gambarRekap() {
+    var wadah = $('wadahHalaman');
+    if (!wadah || !DATA_REKAP.siap) { return; }
+
+    var kata = FILTER_REKAP.kata.trim().toLowerCase();
+    var daftar = DATA_REKAP.baris.filter(function (r) {
+      return !kata || (r.nama + ' ' + r.nis).toLowerCase().indexOf(kata) >= 0;
+    });
+    var total = 0;
+    daftar.forEach(function (r) { total += r.nominal; });
+
+    $('subHalaman').textContent = daftar.length + ' pembayaran sah \u2022 Total: ' + formatRupiah(total);
+
+    wadah.innerHTML = '';
+    var panel = el('div', 'panel');
+    if (!daftar.length) {
+      panel.appendChild(el('div', 'kosong', DATA_REKAP.baris.length
+        ? 'Tidak ada data yang cocok dengan pencarian.'
+        : 'Belum ada pembayaran sah untuk filter ini.'));
+    } else {
+      var kolom = [
+        { judul: 'No', isi: function (r, i) { return i + 1; } },
+        { judul: 'NIS', kunci: 'nis', isi: function (r) { return r.nis; } },
+        { judul: 'Nama Santri', kunci: 'nama', isi: function (r) { return r.nama; } },
+        { judul: 'Kelompok', kunci: 'kelompok', isi: function (r) { return r.namaKelompok; } },
+        { judul: 'Bulan', kunci: 'bulan', isi: function (r) { return NAMA_BULAN[r.bulan - 1]; } },
+        { judul: 'Tahun', kunci: 'tahun', isi: function (r) { return r.tahun; } },
+        { judul: 'Tanggal Bayar', kunci: 'tanggal', isi: function (r) { return tampilTanggal(r.tanggal); } },
+        { judul: 'Nominal', kunci: 'nominal', angka: true, isi: function (r) { return formatRupiah(r.nominal); } },
+        { judul: 'Penerima', kunci: 'penerima', isi: function (r) { return r.penerima; } }
+      ];
+      var terurut = urutkanDaftar(daftar, URUT_REKAP, PENGAMBIL_REKAP);
+      var tabel = buatTabelUrut(kolom, terurut, URUT_REKAP, gambarRekap);
+      tambahBarisTotal(tabel, kolom.length, 'TOTAL PENERIMAAN', formatRupiah(total), 7);
+      panel.appendChild(tabel);
+    }
+    wadah.appendChild(panel);
+  }
+
+  HALAMAN.rekap = renderRekap;
+
+  /* =================== REKAP TUNGGAKAN =================== */
+  var DATA_TUNGGAKAN = { baris: [], awalPenagihan: null, akhirHitung: null, tanpaNominal: false, tanpaTanggalBerhenti: 0, kelompok: [], siap: false };
+  var FILTER_TUNGGAKAN = { bulan: 0, tahun: 0, idKelompok: '', status: 'SEMUA', hanyaMenunggak: true, kata: '' };
+  var URUT_TUNGGAKAN = { kunci: null, arah: 'asc' };
+
+  var PENGAMBIL_TUNGGAKAN = {
+    nis: function (r) { return r.nis; },
+    nama: function (r) { return r.nama; },
+    kelompok: function (r) { return r.namaKelompok; },
+    jumlah: function (r) { return r.jumlah; },
+    total: function (r) { return r.total; }
+  };
+
+  /* Meringkas daftar bulan: "Maret, April 2026; Januari 2027" */
+  function ringkasBulan(daftar) {
+    if (!daftar.length) { return 'Lunas'; }
+    var perTahun = {};
+    var urutan = [];
+    daftar.forEach(function (b) {
+      if (!perTahun[b.tahun]) { perTahun[b.tahun] = []; urutan.push(b.tahun); }
+      perTahun[b.tahun].push(NAMA_BULAN[b.bulan - 1]);
+    });
+    return urutan.map(function (t) { return perTahun[t].join(', ') + ' ' + t; }).join('; ');
+  }
+
+  function renderTunggakan(item) {
+    var admin = STATE.pengguna.role === 'ADMIN';
+    var sekarang = new Date();
+    var tahunIni = sekarang.getFullYear();
+    var bulanIni = sekarang.getMonth() + 1;
+    FILTER_TUNGGAKAN = { bulan: bulanIni, tahun: tahunIni, idKelompok: '', status: 'SEMUA', hanyaMenunggak: true, kata: '' };
+    URUT_TUNGGAKAN = { kunci: null, arah: 'asc' };
+    DATA_TUNGGAKAN = { baris: [], awalPenagihan: null, akhirHitung: null, tanpaNominal: false, tanpaTanggalBerhenti: 0, kelompok: [], siap: false };
+
+    buatKepala(item.label, null, null);
+
+    var bar = el('div', 'toolbar');
+
+    var opsiBulan = [];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+    var pilBulan = buatSelect('tgBulan', opsiBulan, String(bulanIni));
+    pilBulan.addEventListener('change', function () { FILTER_TUNGGAKAN.bulan = Number(pilBulan.value); muatTunggakan(); });
+
+    var pilTahun = buatSelect('tgTahun', opsiTahun(tahunIni - 3, tahunIni + 1), String(tahunIni));
+    pilTahun.addEventListener('change', function () { FILTER_TUNGGAKAN.tahun = Number(pilTahun.value); muatTunggakan(); });
+
+    var pilKel = buatSelect('tgKelompok', [{ nilai: '', label: 'Semua kelompok' }], '');
+    pilKel.addEventListener('change', function () { FILTER_TUNGGAKAN.idKelompok = pilKel.value; muatTunggakan(); });
+
+    var pilStatus = buatSelect('tgStatus', [
+      { nilai: 'SEMUA', label: 'Semua santri' },
+      { nilai: 'AKTIF', label: 'Santri aktif' },
+      { nilai: 'NONAKTIF', label: 'Santri nonaktif' }
+    ], 'SEMUA');
+    pilStatus.addEventListener('change', function () { FILTER_TUNGGAKAN.status = pilStatus.value; muatTunggakan(); });
+
+    var cek = el('input');
+    cek.type = 'checkbox';
+    cek.id = 'tgHanya';
+    cek.checked = true;
+    cek.addEventListener('change', function () { FILTER_TUNGGAKAN.hanyaMenunggak = cek.checked; muatTunggakan(); });
+    var labelCek = el('label', 'filter-centang');
+    labelCek.appendChild(cek);
+    labelCek.appendChild(document.createTextNode(' Hanya yang menunggak'));
+
+    var cari = buatInput('tgCari', 'text', '', 60);
+    cari.placeholder = 'Cari nama santri atau NIS...';
+    cari.addEventListener('input', function () { FILTER_TUNGGAKAN.kata = cari.value; gambarTunggakan(); });
+
+    bar.appendChild(buatFilter('Dihitung sampai bulan', pilBulan));
+    bar.appendChild(buatFilter('Tahun', pilTahun));
+    if (admin) { bar.appendChild(buatFilter('Kelompok', pilKel)); }
+    bar.appendChild(buatFilter('Status santri', pilStatus));
+    bar.appendChild(labelCek);
+    bar.appendChild(buatFilter('Cari', cari));
+    $('isiHalaman').appendChild(bar);
+
+    siapkanWadah();
+    muatTunggakan();
+  }
+
+  function muatTunggakan() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_TUNGGAKAN.siap = false;
+    tampilkanMemuat(wadah);
+
+    var f = FILTER_TUNGGAKAN;
+    var kirim = { bulan: f.bulan, tahun: f.tahun, idKelompok: f.idKelompok, status: f.status, hanyaMenunggak: f.hanyaMenunggak };
+
+    panggilServer('ambilRekapTunggakan', [kirim], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'tunggakan') { return; }
+      DATA_TUNGGAKAN = res.data;
+      DATA_TUNGGAKAN.siap = true;
+
+      var pilKel = $('tgKelompok');
+      if (pilKel) {
+        pilKel.innerHTML = '';
+        var semuaKel = el('option', null, 'Semua kelompok');
+        semuaKel.value = '';
+        pilKel.appendChild(semuaKel);
+        DATA_TUNGGAKAN.kelompok.forEach(function (k) {
+          var op = el('option', null, k.nama);
+          op.value = k.id;
+          pilKel.appendChild(op);
+        });
+        pilKel.value = FILTER_TUNGGAKAN.idKelompok;
+      }
+      gambarTunggakan();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'tunggakan') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatTunggakan);
+    });
+  }
+
+  function gambarTunggakan() {
+    var wadah = $('wadahHalaman');
+    var d = DATA_TUNGGAKAN;
+    if (!wadah || !d.siap) { return; }
+    var admin = STATE.pengguna.role === 'ADMIN';
+
+    wadah.innerHTML = '';
+    $('subHalaman').textContent = 'Dihitung sampai ' + NAMA_BULAN[FILTER_TUNGGAKAN.bulan - 1] + ' ' + FILTER_TUNGGAKAN.tahun;
+
+    if (d.tanpaNominal) {
+      wadah.appendChild(el('div', 'pesan info', 'Nominal infaq belum diatur, sehingga tunggakan belum dapat dihitung. ' +
+        (admin ? 'Atur nominal di menu Pengaturan.' : 'Hubungi Admin.')));
+      return;
+    }
+    if (d.awalPenagihan) {
+      wadah.appendChild(el('div', 'pesan info', 'Penagihan dimulai dari periode nominal paling awal: ' +
+        NAMA_BULAN[d.awalPenagihan.bulan - 1] + ' ' + d.awalPenagihan.tahun + '. Bulan sebelumnya tidak ditagih.'));
+    }
+    if (d.tanpaTanggalBerhenti > 0) {
+      wadah.appendChild(el('div', 'pesan galat', d.tanpaTanggalBerhenti +
+        ' santri nonaktif tidak dihitung karena tanggal berhentinya tidak tercatat. Aktifkan lalu nonaktifkan kembali dengan tanggal berhenti.'));
     }
 
-    var hitung = hitungTunggakanSantri_({
-      awalIdx: awalIdx,
-      masukIdx: indeksBulanDariTanggal_(s.TANGGAL_MASUK),
-      berhentiIdx: berhentiIdx,
-      akhirIdx: akhirIdx,
-      dibayar: dibayar[id] || {},
-      bebas: bebasUmum.concat(bebasSantri[id] || []),
-      riwayatNominal: riwayatNominal
+    var kata = FILTER_TUNGGAKAN.kata.trim().toLowerCase();
+    var daftar = d.baris.filter(function (r) {
+      return !kata || (r.nama + ' ' + r.nis).toLowerCase().indexOf(kata) >= 0;
     });
 
-    if (f.hanyaMenunggak && hitung.jumlah === 0) { return; }
-
-    var nama = String(s.NAMA_SANTRI).trim();
-    var nis = String(s.NIS).trim();
-    if (f.kata && (nama + ' ' + nis).toLowerCase().indexOf(f.kata) < 0) { return; }
-
-    hasil.baris.push({
-      idSantri: id,
-      nis: nis,
-      nama: nama,
-      idKelompok: idKel,
-      namaKelompok: petaKel[idKel] ? petaKel[idKel].nama : idKel,
-      aktif: aktif,
-      bulanTertunggak: hitung.bulan,
-      jumlah: hitung.jumlah,
-      total: hitung.total
+    var jumlahMenunggak = 0;
+    var totalBulan = 0;
+    var totalRupiah = 0;
+    daftar.forEach(function (r) {
+      if (r.jumlah > 0) { jumlahMenunggak++; }
+      totalBulan += r.jumlah;
+      totalRupiah += r.total;
     });
-  });
 
-  hasil.baris.sort(function (a, b) {
-    var k = a.namaKelompok.localeCompare(b.namaKelompok, 'id');
-    return k !== 0 ? k : a.nama.localeCompare(b.nama, 'id');
-  });
-  return hasil;
-}
+    var grid = el('div', 'grid-stat');
+    grid.appendChild(buatKartuStat('peringatan', 'merah', 'Santri Menunggak', jumlahMenunggak, 'dari ' + daftar.length + ' santri ditampilkan'));
+    grid.appendChild(buatKartuStat('uang', 'emas', 'Total Tunggakan', formatRupiah(totalRupiah), 'sampai ' + NAMA_BULAN[FILTER_TUNGGAKAN.bulan - 1] + ' ' + FILTER_TUNGGAKAN.tahun));
+    grid.appendChild(buatKartuStat('kalender', '', 'Total Bulan Tertunggak', totalBulan, 'jumlah seluruh santri'));
+    wadah.appendChild(grid);
 
-/**
- * Admin: semua kelompok. Petugas: hanya kelompoknya.
- * filter: { bulan, tahun, idKelompok, status, hanyaMenunggak, kata }
- */
-function ambilRekapTunggakan(token, filter) {
-  try {
-    var profil = wajibLogin_(token);
-    var f = normalisasiFilterRekap_(profil, filter, true);
-    return { berhasil: true, data: hitungTunggakan_(profil, f) };
-  } catch (err) {
-    return galatKeRespons_(err);
-  }
-}
-
-/* ======================== UJI OTOMATIS ======================== */
-
-/**
- * Menguji aturan perhitungan tunggakan dengan data buatan (tidak membaca spreadsheet).
- * Dijalankan manual dari editor.
- */
-function ujiPerhitunganTunggakan() {
-  pastikanDijalankanPemilik_();
-
-  var nominal = [
-    { tahun: 2026, bulan: 1, nominal: 25000 },
-    { tahun: 2026, bulan: 7, nominal: 30000 }
-  ];
-  var awal = indeksBulan_(2026, 1);
-  function i(th, bl) { return indeksBulan_(th, bl); }
-
-  var kasus = [
-    {
-      nama: 'Dasar: masuk Jan, bayar Jan, dihitung sampai Mar -> Feb dan Mar',
-      p: { awalIdx: awal, masukIdx: i(2026, 1), berhentiIdx: null, akhirIdx: i(2026, 3), dibayar: (function () { var d = {}; d[i(2026, 1)] = true; return d; })(), bebas: [], riwayatNominal: nominal },
-      jumlah: 2, total: 50000
-    },
-    {
-      nama: 'Masuk Mar: bulan sebelum tanggal masuk tidak dihitung',
-      p: { awalIdx: awal, masukIdx: i(2026, 3), berhentiIdx: null, akhirIdx: i(2026, 5), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 3, total: 75000
-    },
-    {
-      nama: 'Berhenti Apr: bulan setelah berhenti tidak dihitung',
-      p: { awalIdx: awal, masukIdx: i(2026, 1), berhentiIdx: i(2026, 4), akhirIdx: i(2026, 6), dibayar: (function () { var d = {}; d[i(2026, 1)] = true; d[i(2026, 2)] = true; return d; })(), bebas: [], riwayatNominal: nominal },
-      jumlah: 2, total: 50000
-    },
-    {
-      nama: 'Pembebasan Feb-Mar: bulan dibebaskan tidak dihitung',
-      p: { awalIdx: awal, masukIdx: i(2026, 1), berhentiIdx: null, akhirIdx: i(2026, 4), dibayar: (function () { var d = {}; d[i(2026, 1)] = true; return d; })(), bebas: [{ dari: i(2026, 2), sampai: i(2026, 3) }], riwayatNominal: nominal },
-      jumlah: 1, total: 25000
-    },
-    {
-      nama: 'Nominal berubah: Jun 25.000 + Jul 30.000 + Agu 30.000',
-      p: { awalIdx: awal, masukIdx: i(2026, 6), berhentiIdx: null, akhirIdx: i(2026, 8), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 3, total: 85000
-    },
-    {
-      nama: 'Nominal berubah, Jun sudah dibayar: Jul + Agu = 60.000',
-      p: { awalIdx: awal, masukIdx: i(2026, 6), berhentiIdx: null, akhirIdx: i(2026, 8), dibayar: (function () { var d = {}; d[i(2026, 6)] = true; return d; })(), bebas: [], riwayatNominal: nominal },
-      jumlah: 2, total: 60000
-    },
-    {
-      nama: 'Tanggal masuk tidak diketahui: mulai dari awal penagihan',
-      p: { awalIdx: awal, masukIdx: null, berhentiIdx: null, akhirIdx: i(2026, 2), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 2, total: 50000
-    },
-    {
-      nama: 'Batas hitung sebelum awal penagihan: tidak ada tunggakan',
-      p: { awalIdx: awal, masukIdx: i(2025, 6), berhentiIdx: null, akhirIdx: i(2025, 12), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 0, total: 0
-    },
-    {
-      nama: 'Masuk 2024 (sebelum nominal ada): hanya dihitung mulai awal penagihan',
-      p: { awalIdx: awal, masukIdx: i(2024, 5), berhentiIdx: null, akhirIdx: i(2026, 1), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 1, total: 25000
-    },
-    {
-      nama: 'Berhenti sebelum masuk: tidak ada tunggakan',
-      p: { awalIdx: awal, masukIdx: i(2026, 6), berhentiIdx: i(2026, 3), akhirIdx: i(2026, 8), dibayar: {}, bebas: [], riwayatNominal: nominal },
-      jumlah: 0, total: 0
+    var panel = el('div', 'panel');
+    if (!daftar.length) {
+      panel.appendChild(el('div', 'kosong', d.baris.length
+        ? 'Tidak ada data yang cocok dengan pencarian.'
+        : 'Tidak ada santri yang menunggak untuk filter ini.'));
+    } else {
+      var kolom = [
+        { judul: 'No', isi: function (r, i) { return i + 1; } },
+        { judul: 'NIS', kunci: 'nis', isi: function (r) { return r.nis; } },
+        {
+          judul: 'Nama Santri', kunci: 'nama',
+          isi: function (r) {
+            var sel = el('span', null, r.nama);
+            if (!r.aktif) { sel.appendChild(el('span', 'lencana-kecil', 'Nonaktif')); }
+            return sel;
+          }
+        },
+        { judul: 'Kelompok', kunci: 'kelompok', isi: function (r) { return r.namaKelompok; } },
+        { judul: 'Bulan Belum Dibayar', isi: function (r) { return ringkasBulan(r.bulanTertunggak); } },
+        { judul: 'Jumlah Bulan', kunci: 'jumlah', angka: true, isi: function (r) { return r.jumlah; } },
+        { judul: 'Total Tunggakan', kunci: 'total', angka: true, isi: function (r) { return formatRupiah(r.total); } }
+      ];
+      var terurut = urutkanDaftar(daftar, URUT_TUNGGAKAN, PENGAMBIL_TUNGGAKAN);
+      var tabel = buatTabelUrut(kolom, terurut, URUT_TUNGGAKAN, gambarTunggakan);
+      var tfoot = el('tfoot');
+      var tr = el('tr');
+      var tdLabel = el('td', null, 'TOTAL');
+      tdLabel.colSpan = 5;
+      tr.appendChild(tdLabel);
+      tr.appendChild(el('td', 'angka', String(totalBulan)));
+      tr.appendChild(el('td', 'angka', formatRupiah(totalRupiah)));
+      tfoot.appendChild(tr);
+      tabel.querySelector('table').appendChild(tfoot);
+      panel.appendChild(tabel);
     }
-  ];
+    wadah.appendChild(panel);
 
-  var hasil = [];
-  kasus.forEach(function (k) {
-    var h = hitungTunggakanSantri_(k.p);
-    var lulus = h.jumlah === k.jumlah && h.total === k.total;
-    hasil.push((lulus ? 'LULUS' : 'GAGAL') + ' - ' + k.nama + ' (hasil: ' + h.jumlah + ' bulan, ' + h.total + ')');
-  });
-
-  var sahOk = transaksiSah_({ STATUS_TRANSAKSI: 'SAH' }) === true;
-  var batalOk = transaksiSah_({ STATUS_TRANSAKSI: 'DIBATALKAN' }) === false;
-  hasil.push((sahOk ? 'LULUS' : 'GAGAL') + ' - transaksi SAH dihitung sebagai pembayaran');
-  hasil.push((batalOk ? 'LULUS' : 'GAGAL') + ' - transaksi DIBATALKAN tidak dihitung sebagai pembayaran');
-
-  hasil.forEach(function (b) { Logger.log(b); });
-  var gagal = hasil.filter(function (b) { return b.indexOf('GAGAL') === 0; }).length;
-  Logger.log(gagal === 0 ? 'HASIL: SEMUA PENGUJIAN LULUS.' : 'HASIL: ' + gagal + ' PENGUJIAN GAGAL. Kirim log ini kepada saya.');
-}
-
-/**
- * Membuktikan Petugas tidak bisa melihat rekap kelompok lain walau filter dimanipulasi.
- * Butuh akun petugas_uji yang punya kelompok. Tidak mengubah data apa pun.
- */
-function ujiHakAksesTahap7() {
-  pastikanDijalankanPemilik_();
-
-  var petugas = cariPenggunaByUsername_('petugas_uji');
-  if (!petugas || String(petugas.ROLE).trim().toUpperCase() !== ROLE_PETUGAS) {
-    throw new Error('Akun petugas dengan username petugas_uji belum ada. Buat dulu lewat menu Data Petugas.');
-  }
-  var idKelompok = String(petugas.ID_KELOMPOK).trim();
-  if (!idKelompok) {
-    throw new Error('Akun petugas_uji belum memiliki kelompok.');
+    var panelAturan = el('div', 'panel');
+    panelAturan.appendChild(el('h3', 'panel-judul', 'Cara Perhitungan'));
+    var daftarAturan = el('ul', 'daftar-aturan');
+    [
+      'Bulan masuk santri ikut ditagih, bulan sebelum tanggal masuk tidak dihitung.',
+      'Santri nonaktif dihitung sampai bulan tanggal berhenti, bulan sesudahnya tidak dihitung.',
+      'Bulan yang dibebaskan (sheet PEMBEBASAN) tidak dihitung.',
+      'Nominal tiap bulan mengikuti nominal yang berlaku pada bulan itu.',
+      'Bulan dianggap lunas jika ada pembayaran sah, berapa pun nominalnya. Transaksi yang dibatalkan tidak dianggap pembayaran.'
+    ].forEach(function (teks) { daftarAturan.appendChild(el('li', null, teks)); });
+    panelAturan.appendChild(daftarAturan);
+    wadah.appendChild(panelAturan);
   }
 
-  var idLain = 'KLP-TIDAK-ADA';
-  Object.keys(petaKelompok_()).forEach(function (id) { if (id !== idKelompok) { idLain = id; } });
+  HALAMAN.tunggakan = renderTunggakan;
 
-  var token = buatSesi_(String(petugas.ID_PENGGUNA).trim());
-  var hasil = [];
+  /* =================== NONAKTIFKAN SANTRI DENGAN TANGGAL BERHENTI =================== */
+  /* Menimpa aksiSantri dari JS_Master.html agar penonaktifan meminta tanggal berhenti. */
+  aksiSantri = function (s) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Detail', function () { bukaDetailSantri(s); }));
+    wadah.appendChild(tombolAksi('Edit', function () { bukaFormSantri(s); }));
 
-  try {
-    var rekap = ambilRekapPembayaran(token, { tahun: 0, bulan: 0, idKelompok: idLain });
-    var bocor1 = rekap.berhasil && rekap.data.baris.some(function (r) { return r.idKelompok !== idKelompok; });
-    hasil.push((rekap.berhasil && !bocor1 ? 'LULUS' : 'GAGAL') + ' - ambilRekapPembayaran dengan filter kelompok lain hanya berisi kelompok sendiri (' +
-      (rekap.berhasil ? rekap.data.baris.length : 0) + ' baris)');
+    if (s.aktif) {
+      wadah.appendChild(tombolAksi('Nonaktifkan', function () { bukaNonaktifSantri(s); }, true));
+    } else {
+      wadah.appendChild(tombolAksi('Aktifkan', function () {
+        konfirmasi(
+          'Aktifkan Santri',
+          'Aktifkan kembali "' + s.nama + '"? Tanggal berhenti dihapus. Jika santri sempat berhenti beberapa bulan, ' +
+            'bulan-bulan itu akan terhitung sebagai tunggakan kecuali dibebaskan di sheet PEMBEBASAN.',
+          'Ya, Aktifkan', false,
+          function (h) { simpanDanTutup(h, 'ubahStatusSantri', [s.idSantri, true, ''], muatSantri); }
+        );
+      }));
+    }
+    return wadah;
+  };
 
-    var tunggakan = ambilRekapTunggakan(token, { idKelompok: idLain, status: 'SEMUA', hanyaMenunggak: false });
-    var bocor2 = tunggakan.berhasil && tunggakan.data.baris.some(function (r) { return r.idKelompok !== idKelompok; });
-    hasil.push((tunggakan.berhasil && !bocor2 ? 'LULUS' : 'GAGAL') + ' - ambilRekapTunggakan dengan filter kelompok lain hanya berisi kelompok sendiri (' +
-      (tunggakan.berhasil ? tunggakan.data.baris.length : 0) + ' baris)');
+  function bukaNonaktifSantri(s) {
+    var form = el('div');
+    form.appendChild(el('p', null, 'Nonaktifkan "' + s.nama + '"? Data dan riwayat pembayaran tetap tersimpan.'));
+    var fTanggal = buatInput('fTanggalBerhenti', 'date', hariIniIso());
+    form.appendChild(buatField('Tanggal Berhenti', fTanggal,
+      'Bulan pada tanggal ini masih ditagih. Bulan sesudahnya tidak ditagih lagi.'));
 
-    var daftarKel = tunggakan.berhasil ? tunggakan.data.kelompok : [];
-    var kelompokBocor = daftarKel.some(function (k) { return k.id !== idKelompok; });
-    hasil.push((!kelompokBocor ? 'LULUS' : 'GAGAL') + ' - daftar kelompok untuk Petugas hanya berisi kelompok sendiri');
-
-    var palsu = ambilRekapPembayaran('abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH', {});
-    hasil.push((palsu.berhasil === false && palsu.kode === 'SESI_HABIS' ? 'LULUS' : 'GAGAL') + ' - token palsu ditolak (SESI_HABIS)');
-  } finally {
-    CacheService.getScriptCache().remove(kunciSesi_(token));
+    bukaModal('Nonaktifkan Santri', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Ya, Nonaktifkan', kelas: 'tombol-utama bahaya', utama: true,
+        klik: function (h) {
+          if (!fTanggal.value) { h.tampilPesan('Tanggal berhenti wajib diisi.'); return; }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'ubahStatusSantri', [s.idSantri, false, fTanggal.value], muatSantri);
+        }
+      }
+    ]);
   }
-
-  hasil.forEach(function (b) { Logger.log(b); });
-  var gagal = hasil.filter(function (b) { return b.indexOf('GAGAL') === 0; }).length;
-  Logger.log(gagal === 0 ? 'HASIL: SEMUA PENGUJIAN LULUS.' : 'HASIL: ' + gagal + ' PENGUJIAN GAGAL. Kirim log ini kepada saya.');
-}
+</script>
