@@ -1,84 +1,247 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <base target="_top">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aplikasi Infaq TPA Nurul Huda</title>
-  <?!= include('CSS'); ?>
-  <?!= include('CSS_Master'); ?>
+  <style>
+    :root {
+      --hijau-tua: #0B4D3A;
+      --hijau-sedang: #12654D;
+      --hijau-muda: #E7F3EE;
+      --emas: #C9A227;
+      --emas-muda: #FAF3D9;
+      --emas-tua: #8A6D0B;
+      --putih: #FFFFFF;
+      --teks: #1F2D28;
+      --abu: #5B6B65;
+      --garis: #C9D6D0;
+      --merah: #B3261E;
+      --merah-muda: #FDECEA;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      color: var(--teks);
+      background: var(--hijau-tua);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .kartu {
+      width: 100%; max-width: 420px;
+      background: var(--putih);
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+      border-top: 5px solid var(--emas);
+    }
+    h1 { margin: 0; font-size: 24px; color: var(--hijau-tua); text-align: center; }
+    .sub { margin: 4px 0 18px; color: var(--abu); text-align: center; }
+    .logo {
+      width: 64px; height: 64px; margin: 0 auto 12px;
+      border-radius: 50%;
+      background: var(--hijau-tua); color: var(--emas);
+      font-size: 24px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      border: 3px solid var(--emas);
+    }
+    label { display: block; margin: 12px 0 6px; font-size: 14px; font-weight: 600; color: var(--hijau-tua); }
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: 12px; font: inherit;
+      border: 1px solid var(--garis); border-radius: 10px; background: var(--putih);
+    }
+    input:focus-visible, button:focus-visible, summary:focus-visible {
+      outline: 3px solid var(--emas); outline-offset: 2px;
+    }
+    .centang { display: flex; align-items: center; gap: 8px; font-weight: 400; color: var(--abu); margin: 12px 0 0; }
+    .tombol {
+      width: 100%; margin-top: 18px; padding: 13px;
+      font: inherit; font-weight: 700; cursor: pointer;
+      background: var(--hijau-tua); color: var(--putih);
+      border: 0; border-radius: 10px;
+    }
+    .tombol:hover { background: var(--hijau-sedang); }
+    .tombol:disabled { opacity: 0.6; cursor: wait; }
+    .tombol.sekunder { background: var(--putih); color: var(--hijau-tua); border: 2px solid var(--hijau-tua); }
+    .pesan { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+    .pesan.galat { background: var(--merah-muda); color: var(--merah); }
+    .pesan.info { background: var(--emas-muda); color: var(--emas-tua); }
+    .pesan.ok { background: var(--hijau-muda); color: var(--hijau-tua); }
+    .hasil dl { margin: 0 0 8px; display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; }
+    .hasil dt { color: var(--abu); }
+    .hasil dd { margin: 0; font-weight: 600; word-break: break-word; }
+    details { margin-top: 18px; font-size: 13px; color: var(--abu); }
+    summary { cursor: pointer; }
+    #log { margin: 8px 0 0; padding: 10px; background: var(--hijau-muda); border-radius: 8px;
+           white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; color: var(--teks); }
+    [hidden] { display: none !important; }
+  </style>
 </head>
 <body>
+  <main class="kartu">
+    <div class="logo" aria-hidden="true">NH</div>
+    <h1>TPA Nurul Huda</h1>
+    <p class="sub">Aplikasi Pembayaran Infaq Bulanan</p>
 
-  <!-- Layar memuat -->
-  <div id="layarMuat" class="layar-hijau">
-    <div class="spinner"></div>
-    <p class="teks-putih">Memuat aplikasi...</p>
-  </div>
+    <div id="pesan" class="pesan" hidden role="status"></div>
 
-  <!-- Layar login -->
-  <div id="layarLogin" class="layar-hijau" hidden>
-    <section class="kartu">
-      <div class="logo">NH</div>
-      <h1>TPA Nurul Huda</h1>
-      <p class="sub">Aplikasi Pembayaran Infaq Bulanan</p>
+    <form id="formLogin" novalidate>
+      <label for="inputUsername">Username</label>
+      <input id="inputUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="50">
 
-      <div id="pesanLogin" class="pesan" hidden></div>
+      <label for="inputPassword">Password</label>
+      <input id="inputPassword" type="password" autocomplete="current-password" maxlength="200">
 
-      <form id="formLogin" novalidate>
-        <label for="inputUsername">Username</label>
-        <input id="inputUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="50">
+      <label class="centang"><input id="cekTampil" type="checkbox"> Tampilkan password</label>
 
-        <label for="inputPassword">Password</label>
-        <input id="inputPassword" type="password" autocomplete="current-password" maxlength="200">
+      <button id="tombolLogin" class="tombol" type="submit">Login</button>
+    </form>
 
-        <label class="centang"><input id="cekTampil" type="checkbox"> Tampilkan password</label>
-
-        <button id="tombolLogin" class="tombol" type="submit">Login</button>
-      </form>
+    <section id="hasil" class="hasil" hidden>
+      <dl>
+        <dt>Nama</dt><dd id="hNama"></dd>
+        <dt>Username</dt><dd id="hUsername"></dd>
+        <dt>Peran</dt><dd id="hPeran"></dd>
+        <dt>Cek sesi</dt><dd id="hSesi"></dd>
+      </dl>
+      <button id="tombolLogout" class="tombol sekunder" type="button">Logout</button>
     </section>
-  </div>
 
-  <!-- Aplikasi (setelah login) -->
-  <div id="layarAplikasi" class="aplikasi" hidden>
-    <div id="latar" class="latar" hidden></div>
+    <details>
+      <summary>Detail teknis (untuk uji coba)</summary>
+      <pre id="log">Belum ada aktivitas.</pre>
+    </details>
+  </main>
 
-    <aside id="sidebar" class="sidebar" aria-label="Menu utama">
-      <div class="sidebar-merek">
-        <div class="logo-kecil">NH</div>
-        <div>
-          <div class="merek-judul">TPA Nurul Huda</div>
-          <div class="merek-sub">Infaq Bulanan</div>
-        </div>
-      </div>
-      <nav id="menuUtama" class="menu"></nav>
-    </aside>
+  <script>
+    /* ===== PENGATURAN ===== 
+       Ganti tulisan di bawah dengan URL Web App Anda (yang berakhiran /exec). */
+    var API_URL = 'GANTI_DENGAN_URL_EXEC_ANDA';
 
-    <div class="utama">
-      <header class="header-app">
-        <button id="tombolMenu" class="tombol-ikon" type="button" aria-label="Buka menu"></button>
-        <div class="header-judul">Infaq TPA Nurul Huda</div>
-        <div class="header-user">
-          <div id="avatar" class="avatar"></div>
-          <div class="user-teks">
-            <div id="namaPengguna" class="nama-pengguna"></div>
-            <div id="peranPengguna" class="peran"></div>
-          </div>
-        </div>
-      </header>
+    var token = null;
+    var el = function (id) { return document.getElementById(id); };
 
-      <main id="isiHalaman" class="isi-halaman"></main>
-    </div>
-  </div>
+    function catat(teks) {
+      var jam = new Date().toLocaleTimeString('id-ID');
+      var kotak = el('log');
+      if (kotak.textContent === 'Belum ada aktivitas.') { kotak.textContent = ''; }
+      kotak.textContent += jam + '  ' + teks + '\n';
+    }
 
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    function tampilPesan(teks, jenis) {
+      var p = el('pesan');
+      if (!teks) { p.hidden = true; return; }
+      p.className = 'pesan ' + (jenis || 'info');
+      p.textContent = teks;
+      p.hidden = false;
+    }
 
-  <?!= include('JavaScript'); ?>
-  <?!= include('JS_Master'); ?>
-  <?!= include('JS_Pembayaran'); ?>
-  <?!= include('JS_Rekap'); ?>
-  <?!= include('JS_Tahunan'); ?>
-  <?!= include('JS_Laporan'); ?>
-  <?!= include('JS_WhatsApp'); ?>
+    /* Mengirim permintaan ke Apps Script.
+       Memakai Content-Type text/plain agar browser tidak mengirim permintaan pra-periksa (CORS preflight),
+       dan tanpa cookie (credentials: omit) agar sesi akun Google di browser tidak ikut terkirim. */
+    async function panggilApi(fn, args) {
+      var kendali = new AbortController();
+      var waktu = setTimeout(function () { kendali.abort(); }, 30000);
+      try {
+        var resp = await fetch(API_URL, {
+          method: 'POST',
+          redirect: 'follow',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ fn: fn, args: args }),
+          signal: kendali.signal
+        });
+        if (!resp.ok) { throw new Error('Status HTTP ' + resp.status); }
+        var teks = await resp.text();
+        try {
+          return JSON.parse(teks);
+        } catch (e) {
+          throw new Error('Balasan bukan JSON (kemungkinan halaman galat dari Google)');
+        }
+      } finally {
+        clearTimeout(waktu);
+      }
+    }
+
+    function tampilkanLogin() {
+      token = null;
+      el('formLogin').hidden = false;
+      el('hasil').hidden = true;
+      el('inputPassword').value = '';
+    }
+
+    async function prosesLogin(ev) {
+      ev.preventDefault();
+      tampilPesan('');
+
+      if (API_URL.indexOf('https://script.google.com/') !== 0) {
+        tampilPesan('URL Web App belum diisi. Ubah baris API_URL di index.html.', 'galat');
+        return;
+      }
+      var username = el('inputUsername').value.trim();
+      var password = el('inputPassword').value;
+      if (!username || !password) {
+        tampilPesan('Username dan password wajib diisi.', 'galat');
+        return;
+      }
+
+      var tombol = el('tombolLogin');
+      tombol.disabled = true;
+      tombol.textContent = 'Memproses...';
+      catat('Mengirim login untuk username "' + username + '"...');
+
+      try {
+        var res = await panggilApi('login', [username, password]);
+        el('inputPassword').value = '';
+        if (!res || !res.berhasil) {
+          catat('Login ditolak server: ' + (res && res.kode ? res.kode : 'tanpa kode'));
+          tampilPesan(res && res.pesan ? res.pesan : 'Login gagal.', 'galat');
+          return;
+        }
+        token = res.token;
+        catat('Login berhasil. Memeriksa sesi...');
+
+        el('hNama').textContent = res.pengguna.nama;
+        el('hUsername').textContent = res.pengguna.username;
+        el('hPeran').textContent = res.pengguna.role === 'ADMIN' ? 'Admin' : 'Petugas';
+        el('hSesi').textContent = 'Memeriksa...';
+        el('formLogin').hidden = true;
+        el('hasil').hidden = false;
+
+        var sesi = await panggilApi('ambilSesi', [token]);
+        if (sesi && sesi.berhasil) {
+          el('hSesi').textContent = 'Berhasil';
+          catat('Cek sesi berhasil.');
+          tampilPesan('Prototipe berhasil: halaman ini terhubung ke server tanpa masalah akun Google.', 'ok');
+        } else {
+          el('hSesi').textContent = 'Gagal';
+          catat('Cek sesi gagal: ' + (sesi && sesi.kode ? sesi.kode : 'tanpa kode'));
+          tampilPesan('Login berhasil, tetapi pemeriksaan sesi gagal.', 'galat');
+        }
+      } catch (err) {
+        catat('Galat: ' + err.message);
+        tampilPesan('Tidak bisa terhubung ke server. Buka "Detail teknis" di bawah dan kirim isinya.', 'galat');
+      } finally {
+        tombol.disabled = false;
+        tombol.textContent = 'Login';
+      }
+    }
+
+    async function prosesLogout() {
+      var tokenLama = token;
+      tampilkanLogin();
+      tampilPesan('Anda telah logout.', 'info');
+      catat('Logout.');
+      try { await panggilApi('logout', [tokenLama]); } catch (err) { catat('Galat saat logout: ' + err.message); }
+    }
+
+    el('formLogin').addEventListener('submit', prosesLogin);
+    el('tombolLogout').addEventListener('click', prosesLogout);
+    el('cekTampil').addEventListener('change', function () {
+      el('inputPassword').type = this.checked ? 'text' : 'password';
+    });
+  </script>
 </body>
 </html>
