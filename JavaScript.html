@@ -1,0 +1,491 @@
+<script>
+  /* =================== DATA DASAR =================== */
+  var STATE = { token: null, pengguna: null, menu: [], halaman: 'dashboard', nomorPermintaan: 0 };
+  var KUNCI_TOKEN = 'tpa_nurul_huda_token';
+  var DAFTAR_LAYAR = ['layarMuat', 'layarLogin', 'layarAplikasi'];
+  var TINGGI_GRAFIK = 160;
+
+  var NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  var SINGKAT_BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+  /* Ikon (gaya garis sederhana). Hanya berisi teks tetap dari kode ini. */
+  var IKON = {
+    beranda: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    pengguna: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    kelompok: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
+    petugas: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/>',
+    tambah: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>',
+    riwayat: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    berkas: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+    peringatan: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+    kalender: '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    unduh: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    cetak: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+    pesan: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+    pengaturan: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+    keluar: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+    menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+    uang: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+    centang: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    grafik: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>'
+  };
+
+  /* Menu hanya TAMPILAN. Keamanan data tetap diperiksa di server. */
+  var MENU_ADMIN = [
+    { id: 'dashboard', label: 'Dashboard', ikon: 'beranda', tahap: 4 },
+    { id: 'santri', label: 'Data Santri', ikon: 'pengguna', tahap: 5 },
+    { id: 'kelompok', label: 'Data Kelompok', ikon: 'kelompok', tahap: 5 },
+    { id: 'petugas', label: 'Data Petugas', ikon: 'petugas', tahap: 5 },
+    { id: 'input', label: 'Input Pembayaran', ikon: 'tambah', tahap: 6 },
+    { id: 'riwayat', label: 'Riwayat Pembayaran', ikon: 'riwayat', tahap: 6 },
+    { id: 'rekap', label: 'Rekap Pembayaran', ikon: 'berkas', tahap: 7 },
+    { id: 'tunggakan', label: 'Rekap Tunggakan', ikon: 'peringatan', tahap: 7 },
+    { id: 'tahunan', label: 'Rekap Tahunan', ikon: 'kalender', tahap: 8 },
+    { id: 'excel', label: 'Laporan Excel', ikon: 'unduh', tahap: 9 },
+    { id: 'pdf', label: 'Cetak PDF', ikon: 'cetak', tahap: 9 },
+    { id: 'wa', label: 'WhatsApp Orang Tua', ikon: 'pesan', tahap: 10 },
+    { id: 'pengaturan', label: 'Pengaturan', ikon: 'pengaturan', tahap: 6 },
+    { id: 'logout', label: 'Logout', ikon: 'keluar' }
+  ];
+
+  var MENU_PETUGAS = [
+    { id: 'dashboard', label: 'Dashboard Kelompok', ikon: 'beranda', tahap: 4 },
+    { id: 'input', label: 'Input Pembayaran', ikon: 'tambah', tahap: 6 },
+    { id: 'riwayat', label: 'Riwayat Pembayaran', ikon: 'riwayat', tahap: 6 },
+    { id: 'rekap', label: 'Rekap Pembayaran', ikon: 'berkas', tahap: 7 },
+    { id: 'tunggakan', label: 'Rekap Tunggakan', ikon: 'peringatan', tahap: 7 },
+    { id: 'wa', label: 'WhatsApp Orang Tua', ikon: 'pesan', tahap: 10 },
+    { id: 'logout', label: 'Logout', ikon: 'keluar' }
+  ];
+
+  /* =================== PEMBANTU =================== */
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, kelas, teks) {
+    var e = document.createElement(tag);
+    if (kelas) { e.className = kelas; }
+    if (teks !== undefined && teks !== null) { e.textContent = teks; }
+    return e;
+  }
+
+  function svgIkon(nama, ukuran) {
+    var u = ukuran || 20;
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + u + '" height="' + u +
+      '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      (IKON[nama] || '') + '</svg>';
+  }
+
+  function formatRupiah(n) {
+    return 'Rp' + (Number(n) || 0).toLocaleString('id-ID');
+  }
+
+  function ringkasRupiah(n) {
+    n = Number(n) || 0;
+    if (n <= 0) { return ''; }
+    if (n >= 1000000) { return (Math.round(n / 100000) / 10).toString().replace('.', ',') + ' jt'; }
+    if (n >= 1000) { return Math.round(n / 1000) + ' rb'; }
+    return String(n);
+  }
+
+  function inisial(nama) {
+    var kata = String(nama).trim().split(/\s+/);
+    var hasil = kata[0].charAt(0);
+    if (kata.length > 1) { hasil += kata[kata.length - 1].charAt(0); }
+    return hasil.toUpperCase();
+  }
+
+  var penundaToast = null;
+  function tampilToast(teks, jenis) {
+    var t = $('toast');
+    t.className = 'toast' + (jenis === 'galat' ? ' galat' : '');
+    t.textContent = teks;
+    t.hidden = false;
+    if (penundaToast) { clearTimeout(penundaToast); }
+    penundaToast = setTimeout(function () { t.hidden = true; }, 3500);
+  }
+
+  /* =================== TOKEN DI BROWSER =================== */
+  function simpanToken(token) {
+    STATE.token = token;
+    try { sessionStorage.setItem(KUNCI_TOKEN, token); } catch (e) { /* abaikan */ }
+  }
+  function bacaTokenTersimpan() {
+    try { return sessionStorage.getItem(KUNCI_TOKEN); } catch (e) { return null; }
+  }
+  function hapusToken() {
+    STATE.token = null;
+    STATE.pengguna = null;
+    try { sessionStorage.removeItem(KUNCI_TOKEN); } catch (e) { /* abaikan */ }
+  }
+
+  /* =================== LAYAR =================== */
+  function tampilkanLayar(namaLayar) {
+    DAFTAR_LAYAR.forEach(function (id) { $(id).hidden = (id !== namaLayar); });
+  }
+
+  function tampilkanPesanLogin(teks, jenis) {
+    var kotak = $('pesanLogin');
+    if (!teks) { kotak.hidden = true; kotak.textContent = ''; return; }
+    kotak.className = 'pesan ' + (jenis || 'galat');
+    kotak.textContent = teks;
+    kotak.hidden = false;
+  }
+
+  function keLayarLogin(pesan, jenis) {
+    hapusToken();
+    STATE.nomorPermintaan++;
+    tutupMenu();
+    $('isiHalaman').innerHTML = '';
+    $('inputPassword').value = '';
+    tampilkanPesanLogin(pesan, jenis);
+    tampilkanLayar('layarLogin');
+  }
+
+  function keAplikasi(pengguna) {
+    STATE.pengguna = pengguna;
+    var admin = pengguna.role === 'ADMIN';
+    $('namaPengguna').textContent = pengguna.nama;
+    $('peranPengguna').textContent = admin ? 'Admin' : 'Petugas';
+    $('avatar').textContent = inisial(pengguna.nama);
+    bangunMenu(pengguna.role);
+    tampilkanLayar('layarAplikasi');
+    bukaHalaman('dashboard');
+  }
+
+  /* =================== MENU DAN SIDEBAR =================== */
+  function bukaMenu() {
+    $('sidebar').classList.add('terbuka');
+    $('latar').hidden = false;
+  }
+  function tutupMenu() {
+    $('sidebar').classList.remove('terbuka');
+    $('latar').hidden = true;
+  }
+
+  function bangunMenu(role) {
+    STATE.menu = (role === 'ADMIN') ? MENU_ADMIN : MENU_PETUGAS;
+    var nav = $('menuUtama');
+    nav.innerHTML = '';
+    STATE.menu.forEach(function (item) {
+      var tombol = el('button', 'menu-item' + (item.id === 'logout' ? ' menu-keluar' : ''));
+      tombol.type = 'button';
+      tombol.setAttribute('data-menu', item.id);
+      tombol.innerHTML = svgIkon(item.ikon, 20) + '<span></span>';
+      tombol.querySelector('span').textContent = item.label;
+      tombol.addEventListener('click', function () {
+        tutupMenu();
+        if (item.id === 'logout') { prosesLogout(); } else { bukaHalaman(item.id); }
+      });
+      nav.appendChild(tombol);
+    });
+  }
+
+  function cariItemMenu(id) {
+    for (var i = 0; i < STATE.menu.length; i++) {
+      if (STATE.menu[i].id === id) { return STATE.menu[i]; }
+    }
+    return null;
+  }
+
+  function tandaiMenuAktif(id) {
+    var daftar = document.querySelectorAll('.menu-item');
+    for (var i = 0; i < daftar.length; i++) {
+      var aktif = daftar[i].getAttribute('data-menu') === id;
+      daftar[i].classList.toggle('aktif', aktif);
+      if (aktif) { daftar[i].setAttribute('aria-current', 'page'); } else { daftar[i].removeAttribute('aria-current'); }
+    }
+  }
+
+  function bukaHalaman(id) {
+    var item = cariItemMenu(id);
+    if (!item || id === 'logout') { return; }
+    STATE.halaman = id;
+    tandaiMenuAktif(id);
+    if (id === 'dashboard') { renderDashboard(item.label); } else { renderSegera(item); }
+    window.scrollTo(0, 0);
+  }
+
+  function renderSegera(item) {
+    STATE.nomorPermintaan++;
+    var isi = $('isiHalaman');
+    isi.innerHTML = '';
+
+    var kepala = el('div', 'kepala-halaman');
+    var kiri = el('div');
+    kiri.appendChild(el('h2', null, item.label));
+    kepala.appendChild(kiri);
+    isi.appendChild(kepala);
+
+    var panel = el('div', 'panel halaman-segera');
+    var ikon = el('div', 'ikon-besar');
+    ikon.innerHTML = svgIkon(item.ikon, 34);
+    panel.appendChild(ikon);
+    panel.appendChild(el('h3', null, item.label));
+    panel.appendChild(el('p', 'catatan-kecil', 'Halaman ini sedang disiapkan.'));
+    panel.appendChild(el('span', 'lencana-tahap', 'Dibuat pada Tahap ' + item.tahap));
+    isi.appendChild(panel);
+  }
+
+  /* =================== DASHBOARD =================== */
+  function renderDashboard(judul) {
+    var isi = $('isiHalaman');
+    isi.innerHTML = '';
+
+    var kepala = el('div', 'kepala-halaman');
+    var kiri = el('div');
+    kiri.appendChild(el('h2', null, judul));
+    var sub = el('p', null, 'Memuat data...');
+    sub.id = 'subDashboard';
+    kiri.appendChild(sub);
+
+    var tombolMuat = el('button', 'tombol-sekunder', 'Muat Ulang');
+    tombolMuat.type = 'button';
+    tombolMuat.addEventListener('click', function () { muatDashboard(true); });
+
+    kepala.appendChild(kiri);
+    kepala.appendChild(tombolMuat);
+    isi.appendChild(kepala);
+
+    var wadah = el('div');
+    wadah.id = 'wadahDashboard';
+    isi.appendChild(wadah);
+
+    muatDashboard(false);
+  }
+
+  function tampilkanMemuat(wadah) {
+    wadah.innerHTML = '';
+    var kotak = el('div', 'memuat');
+    kotak.appendChild(el('div', 'spinner gelap'));
+    kotak.appendChild(el('div', null, 'Memuat data...'));
+    wadah.appendChild(kotak);
+  }
+
+  function tampilkanGalatMemuat(wadah, pesan) {
+    wadah.innerHTML = '';
+    var kotak = el('div', 'panel galat-memuat');
+    kotak.appendChild(el('div', null, pesan));
+    var tombol = el('button', 'tombol-sekunder', 'Coba Lagi');
+    tombol.type = 'button';
+    tombol.addEventListener('click', function () { muatDashboard(true); });
+    kotak.appendChild(tombol);
+    wadah.appendChild(kotak);
+  }
+
+  function muatDashboard(manual) {
+    var wadah = $('wadahDashboard');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    tampilkanMemuat(wadah);
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'dashboard') { return; }
+        if (res && res.berhasil) {
+          isiDashboard(res.data);
+          if (manual) { tampilToast('Data diperbarui.', 'ok'); }
+        } else if (res && res.kode === 'SESI_HABIS') {
+          keLayarLogin(res.pesan, 'info');
+        } else {
+          var pesan = res && res.pesan ? res.pesan : 'Data tidak dapat dimuat.';
+          tampilkanGalatMemuat(wadah, pesan);
+          tampilToast(pesan, 'galat');
+        }
+      })
+      .withFailureHandler(function () {
+        if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'dashboard') { return; }
+        tampilkanGalatMemuat(wadah, 'Gagal terhubung ke server. Periksa koneksi internet Anda.');
+        tampilToast('Gagal terhubung ke server.', 'galat');
+      })
+      .ambilDashboard(STATE.token);
+  }
+
+  function buatKartuStat(ikon, warna, judul, nilai, catatan) {
+    var kartu = el('div', 'kartu-stat');
+    var wadahIkon = el('div', 'ikon-stat' + (warna ? ' ' + warna : ''));
+    wadahIkon.innerHTML = svgIkon(ikon, 24);
+    var teks = el('div');
+    teks.appendChild(el('div', 'stat-judul', judul));
+    teks.appendChild(el('div', 'stat-nilai', String(nilai)));
+    teks.appendChild(el('div', 'stat-catatan', catatan));
+    kartu.appendChild(wadahIkon);
+    kartu.appendChild(teks);
+    return kartu;
+  }
+
+  function buatGrafik(data, tahun, bulanIni) {
+    var maks = 0;
+    data.forEach(function (n) { if (n > maks) { maks = n; } });
+
+    var gulir = el('div', 'grafik-gulir');
+    var grafik = el('div', 'grafik');
+
+    data.forEach(function (nilai, i) {
+      var kolom = el('div', 'kolom');
+      kolom.appendChild(el('div', 'nilai-batang', ringkasRupiah(nilai)));
+
+      var area = el('div', 'area-batang');
+      var batang = el('div', 'batang' + (i + 1 === bulanIni ? ' sekarang' : ''));
+      var tinggi = maks > 0 ? Math.max(2, Math.round(nilai / maks * TINGGI_GRAFIK)) : 2;
+      batang.style.height = tinggi + 'px';
+      batang.title = NAMA_BULAN[i] + ' ' + tahun + ': ' + formatRupiah(nilai);
+      area.appendChild(batang);
+      kolom.appendChild(area);
+
+      kolom.appendChild(el('div', 'label-bulan' + (i + 1 === bulanIni ? ' sekarang' : ''), SINGKAT_BULAN[i]));
+      grafik.appendChild(kolom);
+    });
+
+    gulir.appendChild(grafik);
+    return gulir;
+  }
+
+  function buatTabelTerbaru(daftar) {
+    if (!daftar.length) {
+      return el('div', 'kosong', 'Belum ada pembayaran tercatat.');
+    }
+    var gulir = el('div', 'tabel-gulir');
+    var tabel = el('table', 'tabel');
+
+    var kepala = el('thead');
+    var barisKepala = el('tr');
+    ['Tanggal Bayar', 'Santri', 'Kelompok', 'Periode', 'Nominal', 'Penerima'].forEach(function (judul) {
+      barisKepala.appendChild(el('th', judul === 'Nominal' ? 'angka' : null, judul));
+    });
+    kepala.appendChild(barisKepala);
+    tabel.appendChild(kepala);
+
+    var badan = el('tbody');
+    daftar.forEach(function (p) {
+      var baris = el('tr');
+      baris.appendChild(el('td', null, p.tanggal));
+      baris.appendChild(el('td', null, p.santri));
+      baris.appendChild(el('td', null, p.kelompok));
+      baris.appendChild(el('td', null, p.periode));
+      baris.appendChild(el('td', 'angka', formatRupiah(p.nominal)));
+      baris.appendChild(el('td', null, p.penerima));
+      badan.appendChild(baris);
+    });
+    tabel.appendChild(badan);
+    gulir.appendChild(tabel);
+    return gulir;
+  }
+
+  function isiDashboard(d) {
+    var sub = $('subDashboard');
+    if (sub) { sub.textContent = d.cakupan + '  •  ' + d.namaBulan + ' ' + d.tahun; }
+
+    var wadah = $('wadahDashboard');
+    wadah.innerHTML = '';
+
+    // Kartu statistik
+    var grid = el('div', 'grid-stat');
+    grid.appendChild(buatKartuStat('pengguna', '', 'Santri Aktif', d.santriAktif, d.cakupan));
+    grid.appendChild(buatKartuStat('uang', 'emas', 'Penerimaan Bulan Ini', formatRupiah(d.penerimaanBulanIni), d.namaBulan + ' ' + d.tahun));
+    grid.appendChild(buatKartuStat('centang', '', 'Sudah Bayar Bulan Ini', d.sudahBayarBulanIni, 'dari ' + d.jumlahSantriWajib + ' santri wajib bayar'));
+    grid.appendChild(buatKartuStat('peringatan', 'merah', 'Belum Bayar Bulan Ini', d.belumBayarBulanIni, 'Total tunggakan lengkap: Tahap 7'));
+    grid.appendChild(buatKartuStat('grafik', 'emas', 'Penerimaan Tahun ' + d.tahun, formatRupiah(d.penerimaanTahunIni), 'Januari sampai Desember'));
+    if (d.jumlahKelompokAktif !== null && d.jumlahKelompokAktif !== undefined) {
+      grid.appendChild(buatKartuStat('kelompok', '', 'Kelompok Aktif', d.jumlahKelompokAktif, 'Seluruh TPA'));
+    }
+    wadah.appendChild(grid);
+
+    // Grafik
+    var panelGrafik = el('div', 'panel');
+    panelGrafik.appendChild(el('h3', 'panel-judul', 'Penerimaan Infaq per Bulan ' + d.tahun));
+    panelGrafik.appendChild(buatGrafik(d.grafik, d.tahun, d.bulan));
+    if (d.penerimaanTahunIni === 0) {
+      panelGrafik.appendChild(el('div', 'kosong', 'Belum ada pembayaran tercatat pada tahun ini.'));
+    }
+    wadah.appendChild(panelGrafik);
+
+    // Tabel pembayaran terbaru
+    var panelTabel = el('div', 'panel');
+    panelTabel.appendChild(el('h3', 'panel-judul', 'Pembayaran Terbaru'));
+    panelTabel.appendChild(buatTabelTerbaru(d.terbaru));
+    wadah.appendChild(panelTabel);
+  }
+
+  /* =================== MULAI, LOGIN, LOGOUT =================== */
+  function mulaiAplikasi() {
+    var token = bacaTokenTersimpan();
+    if (!token) { keLayarLogin(); return; }
+    STATE.token = token;
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.berhasil) {
+          keAplikasi(res.pengguna);
+        } else {
+          keLayarLogin('Sesi Anda sudah berakhir. Silakan login kembali.', 'info');
+        }
+      })
+      .withFailureHandler(function () {
+        keLayarLogin('Gagal terhubung ke server. Periksa koneksi internet Anda.', 'galat');
+      })
+      .ambilSesi(token);
+  }
+
+  function prosesLogin() {
+    var username = $('inputUsername').value.trim();
+    var password = $('inputPassword').value;
+    var tombol = $('tombolLogin');
+
+    if (!username || !password) {
+      tampilkanPesanLogin('Username dan password wajib diisi.', 'galat');
+      return;
+    }
+
+    tombol.disabled = true;
+    tombol.textContent = 'Memproses...';
+    tampilkanPesanLogin('');
+
+    google.script.run
+      .withSuccessHandler(function (res) {
+        tombol.disabled = false;
+        tombol.textContent = 'Login';
+        $('inputPassword').value = '';
+        if (res && res.berhasil) {
+          simpanToken(res.token);
+          keAplikasi(res.pengguna);
+        } else {
+          tampilkanPesanLogin(res && res.pesan ? res.pesan : 'Login gagal.', 'galat');
+        }
+      })
+      .withFailureHandler(function () {
+        tombol.disabled = false;
+        tombol.textContent = 'Login';
+        tampilkanPesanLogin('Gagal terhubung ke server. Silakan coba lagi.', 'galat');
+      })
+      .login(username, password);
+  }
+
+  function prosesLogout() {
+    var token = STATE.token;
+    function selesai() { keLayarLogin('Anda telah logout.', 'info'); }
+    google.script.run
+      .withSuccessHandler(selesai)
+      .withFailureHandler(selesai)
+      .logout(token);
+  }
+
+  /* =================== PENDENGAR PERISTIWA =================== */
+  $('tombolMenu').innerHTML = svgIkon('menu', 24);
+  $('tombolMenu').addEventListener('click', function () {
+    if ($('sidebar').classList.contains('terbuka')) { tutupMenu(); } else { bukaMenu(); }
+  });
+  $('latar').addEventListener('click', tutupMenu);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { tutupMenu(); }
+  });
+
+  $('formLogin').addEventListener('submit', function (e) {
+    e.preventDefault();
+    prosesLogin();
+  });
+  $('cekTampil').addEventListener('change', function () {
+    $('inputPassword').type = this.checked ? 'text' : 'password';
+  });
+
+  mulaiAplikasi();
+</script>

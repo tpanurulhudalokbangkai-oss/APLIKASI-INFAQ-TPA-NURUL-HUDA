@@ -1,0 +1,300 @@
+<style>
+  /* Tahap 10: gaya halaman WhatsApp */
+  .pesan-wa {
+    background: #DCF8C6;
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin: 10px 0 0;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+  .info-kontak { font-size: 14px; color: var(--abu); }
+  .kontak-sel div { line-height: 1.4; }
+  .nomor-bermasalah { color: var(--merah); font-weight: 600; }
+  .tombol-aksi.wa { background: var(--hijau-tua); color: var(--putih); border-color: var(--hijau-tua); }
+  .tombol-aksi.wa:hover { background: #0E5F48; }
+  .tombol-aksi.wa:disabled { background: #8FAEA4; border-color: #8FAEA4; cursor: not-allowed; }
+</style>
+
+<script>
+  /* =========================================================
+     JS_WhatsApp.html - Tahap 10
+     Halaman WhatsApp Orang Tua (Admin dan Petugas).
+     Aplikasi TIDAK mengirim pesan: tombol hanya membuka WhatsApp
+     dengan pesan terisi, dan pengguna harus menekan Kirim sendiri.
+     ========================================================= */
+
+  var DATA_WA = { baris: [], kelompok: [], tahun: 0, bulan: 0, tanpaNominal: false, tanpaTanggalBerhenti: 0, siap: false };
+  var FILTER_WA = { bulan: 0, tahun: 0, idKelompok: '', status: 'SEMUA', hanyaMenunggak: true, kata: '' };
+  var WA_DIBUKA = {};   /* penanda sesi ini saja: tautan sudah dibuka (BUKAN bukti terkirim) */
+
+  function kunciWa(r) {
+    return r.idSantri + '|' + DATA_WA.tahun + '|' + DATA_WA.bulan;
+  }
+
+  function salinTeks(teks, selesai) {
+    function cadangan() {
+      var area = document.createElement('textarea');
+      area.value = teks;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(area);
+      selesai(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(teks).then(function () { selesai(true); }, cadangan);
+    } else {
+      cadangan();
+    }
+  }
+
+  /* Membuka WhatsApp. Tautan diperiksa lagi sebelum dibuka. */
+  function bukaWa(r) {
+    if (!/^https:\/\/wa\.me\/62\d{8,13}\?text=/.test(r.tautan || '')) {
+      tampilToast('Tautan WhatsApp tidak valid.', 'galat');
+      return;
+    }
+    window.open(r.tautan, '_blank', 'noopener');
+    WA_DIBUKA[kunciWa(r)] = true;
+    gambarWa();
+  }
+
+  /* =================== HALAMAN =================== */
+  function renderWhatsApp(item) {
+    var admin = STATE.pengguna.role === 'ADMIN';
+    var sekarang = new Date();
+    var tahunIni = sekarang.getFullYear();
+    var bulanIni = sekarang.getMonth() + 1;
+    FILTER_WA = { bulan: bulanIni, tahun: tahunIni, idKelompok: '', status: 'SEMUA', hanyaMenunggak: true, kata: '' };
+    DATA_WA = { baris: [], kelompok: [], tahun: tahunIni, bulan: bulanIni, tanpaNominal: false, tanpaTanggalBerhenti: 0, siap: false };
+
+    buatKepala(item.label, null, null);
+    $('subHalaman').textContent = 'Siapkan pesan pemberitahuan infaq untuk orang tua santri';
+
+    $('isiHalaman').appendChild(el('div', 'pesan info',
+      'Tombol "Buka WhatsApp" hanya membuka WhatsApp dengan pesan yang sudah terisi. Pesan baru terkirim setelah Anda menekan Kirim di WhatsApp. ' +
+      'Aplikasi ini tidak mengirim pesan otomatis. Periksa nomor tujuan sebelum mengirim.'));
+
+    var bar = el('div', 'toolbar');
+
+    var opsiBulan = [];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+    var pilBulan = buatSelect('waBulan', opsiBulan, String(bulanIni));
+    pilBulan.addEventListener('change', function () { FILTER_WA.bulan = Number(pilBulan.value); muatWa(); });
+
+    var pilTahun = buatSelect('waTahun', opsiTahun(tahunIni - 3, tahunIni + 1), String(tahunIni));
+    pilTahun.addEventListener('change', function () { FILTER_WA.tahun = Number(pilTahun.value); muatWa(); });
+
+    var pilKel = buatSelect('waKelompok', [{ nilai: '', label: 'Semua kelompok' }], '');
+    pilKel.addEventListener('change', function () { FILTER_WA.idKelompok = pilKel.value; muatWa(); });
+
+    var pilStatus = buatSelect('waStatus', [
+      { nilai: 'SEMUA', label: 'Semua santri' },
+      { nilai: 'AKTIF', label: 'Santri aktif' },
+      { nilai: 'NONAKTIF', label: 'Santri nonaktif' }
+    ], 'SEMUA');
+    pilStatus.addEventListener('change', function () { FILTER_WA.status = pilStatus.value; muatWa(); });
+
+    var cek = el('input');
+    cek.type = 'checkbox';
+    cek.id = 'waHanya';
+    cek.checked = true;
+    cek.addEventListener('change', function () { FILTER_WA.hanyaMenunggak = cek.checked; muatWa(); });
+    var labelCek = el('label', 'filter-centang');
+    labelCek.appendChild(cek);
+    labelCek.appendChild(document.createTextNode(' Hanya yang menunggak'));
+
+    var cari = buatInput('waCari', 'text', '', 60);
+    cari.placeholder = 'Cari nama santri atau NIS...';
+    cari.addEventListener('input', function () { FILTER_WA.kata = cari.value; gambarWa(); });
+
+    bar.appendChild(buatFilter('Informasi sampai bulan', pilBulan));
+    bar.appendChild(buatFilter('Tahun', pilTahun));
+    if (admin) { bar.appendChild(buatFilter('Kelompok', pilKel)); }
+    bar.appendChild(buatFilter('Status santri', pilStatus));
+    bar.appendChild(labelCek);
+    bar.appendChild(buatFilter('Cari', cari));
+    $('isiHalaman').appendChild(bar);
+
+    siapkanWadah();
+    muatWa();
+  }
+
+  function muatWa() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_WA.siap = false;
+    tampilkanMemuat(wadah);
+
+    var f = FILTER_WA;
+    var kirim = { bulan: f.bulan, tahun: f.tahun, idKelompok: f.idKelompok, status: f.status, hanyaMenunggak: f.hanyaMenunggak };
+
+    panggilServer('ambilDaftarWhatsApp', [kirim], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'wa') { return; }
+      DATA_WA = res.data;
+      DATA_WA.siap = true;
+
+      var pilKel = $('waKelompok');
+      if (pilKel) {
+        pilKel.innerHTML = '';
+        var semuaKel = el('option', null, 'Semua kelompok');
+        semuaKel.value = '';
+        pilKel.appendChild(semuaKel);
+        DATA_WA.kelompok.forEach(function (k) {
+          var op = el('option', null, k.nama);
+          op.value = k.id;
+          pilKel.appendChild(op);
+        });
+        pilKel.value = FILTER_WA.idKelompok;
+      }
+      gambarWa();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'wa') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatWa);
+    });
+  }
+
+  function gambarWa() {
+    var wadah = $('wadahHalaman');
+    var d = DATA_WA;
+    if (!wadah || !d.siap) { return; }
+    var admin = STATE.pengguna.role === 'ADMIN';
+
+    wadah.innerHTML = '';
+    $('subHalaman').textContent = 'Informasi sampai ' + NAMA_BULAN[d.bulan - 1] + ' ' + d.tahun;
+
+    if (d.tanpaNominal) {
+      wadah.appendChild(el('div', 'pesan info', 'Nominal infaq belum diatur, sehingga pesan belum dapat disusun. ' +
+        (admin ? 'Atur nominal di menu Pengaturan.' : 'Hubungi Admin.')));
+      return;
+    }
+    if (d.tanpaTanggalBerhenti > 0) {
+      wadah.appendChild(el('div', 'pesan galat', d.tanpaTanggalBerhenti +
+        ' santri nonaktif tidak disertakan karena tanggal berhentinya tidak tercatat.'));
+    }
+
+    var kata = FILTER_WA.kata.trim().toLowerCase();
+    var daftar = d.baris.filter(function (r) {
+      return !kata || (r.nama + ' ' + r.nis).toLowerCase().indexOf(kata) >= 0;
+    });
+
+    var totalRupiah = 0;
+    var bermasalah = 0;
+    daftar.forEach(function (r) {
+      totalRupiah += r.total;
+      if (!r.tautan) { bermasalah++; }
+    });
+
+    var grid = el('div', 'grid-stat');
+    grid.appendChild(buatKartuStat('pesan', '', 'Penerima Pesan', daftar.length, 'orang tua / wali santri'));
+    grid.appendChild(buatKartuStat('uang', 'emas', 'Total Tunggakan', formatRupiah(totalRupiah), 'dari santri yang ditampilkan'));
+    grid.appendChild(buatKartuStat('peringatan', 'merah', 'Tidak Dapat Dikirim', bermasalah, 'nomor tidak valid atau pesan terlalu panjang'));
+    wadah.appendChild(grid);
+
+    var panel = el('div', 'panel');
+    if (!daftar.length) {
+      panel.appendChild(el('div', 'kosong', d.baris.length
+        ? 'Tidak ada santri yang cocok dengan pencarian.'
+        : 'Tidak ada santri untuk filter ini.'));
+    } else {
+      var baris = daftar.map(function (r, i) {
+        return [i + 1, selSantriWa(r), r.namaKelompok, selKontakWa(r), selTunggakanWa(r), aksiWa(r)];
+      });
+      panel.appendChild(buatTabelUmum(['No', 'Santri', 'Kelompok', 'Orang Tua / Nomor WhatsApp', 'Tunggakan', 'Aksi'], baris, 'lebar'));
+    }
+    wadah.appendChild(panel);
+    panel.appendChild(el('div', 'catatan-kecil',
+      'Jika WhatsApp tidak terbuka, izinkan pop-up untuk situs ini, atau gunakan "Lihat Pesan" lalu "Salin Pesan".'));
+  }
+
+  function selSantriWa(r) {
+    var sel = el('div');
+    var nama = el('div', null, r.nama);
+    if (!r.aktif) { nama.appendChild(el('span', 'lencana-kecil', 'Nonaktif')); }
+    sel.appendChild(nama);
+    sel.appendChild(el('div', 'info-kontak', 'NIS ' + r.nis));
+    return sel;
+  }
+
+  function selKontakWa(r) {
+    var sel = el('div', 'kontak-sel');
+    sel.appendChild(el('div', null, r.namaOrangTua || '(nama orang tua kosong)'));
+    if (r.nomorWa) {
+      sel.appendChild(el('div', 'info-kontak', '+' + r.nomorWa));
+    } else {
+      sel.appendChild(el('div', 'nomor-bermasalah', 'Nomor tidak valid' + (r.nomorMentah ? ': ' + r.nomorMentah : '')));
+    }
+    return sel;
+  }
+
+  function selTunggakanWa(r) {
+    if (r.jumlah === 0) { return 'Lunas'; }
+    var sel = el('div');
+    sel.appendChild(el('div', null, r.jumlah + ' bulan \u2022 ' + formatRupiah(r.total)));
+    sel.appendChild(el('div', 'info-kontak', r.ringkasTunggakan));
+    return sel;
+  }
+
+  function aksiWa(r) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Lihat Pesan', function () { bukaPesanWa(r); }));
+
+    var tombol = el('button', 'tombol-aksi wa', 'Buka WhatsApp');
+    tombol.type = 'button';
+    if (r.tautan) {
+      tombol.addEventListener('click', function () { bukaWa(r); });
+    } else {
+      tombol.disabled = true;
+      tombol.title = r.alasanTanpaTautan === 'TERLALU_PANJANG'
+        ? 'Pesan terlalu panjang untuk tautan. Gunakan Lihat Pesan lalu Salin Pesan.'
+        : 'Nomor WhatsApp tidak valid. Perbaiki di menu Data Santri.';
+    }
+    wadah.appendChild(tombol);
+
+    if (WA_DIBUKA[kunciWa(r)]) {
+      var tanda = el('span', 'lencana-kecil', 'Sudah dibuka');
+      tanda.title = 'Hanya menandai bahwa tautan dibuka pada sesi ini. Bukan bukti pesan terkirim.';
+      wadah.appendChild(tanda);
+    }
+    return wadah;
+  }
+
+  function bukaPesanWa(r) {
+    var isi = el('div');
+    isi.appendChild(el('div', 'info-kontak', 'Kepada: ' + (r.namaOrangTua || '(nama orang tua kosong)') + ' \u2022 ' +
+      (r.nomorWa ? '+' + r.nomorWa : 'nomor tidak valid')));
+    isi.appendChild(el('div', 'pesan-wa', r.pesan));
+    isi.appendChild(el('div', 'catatan-kecil', 'Pesan baru terkirim setelah Anda menekan Kirim di WhatsApp.'));
+
+    bukaModal('Pesan untuk ' + r.nama, isi, [
+      { teks: 'Tutup', klik: function () { tutupModal(); } },
+      {
+        teks: 'Salin Pesan',
+        klik: function () {
+          salinTeks(r.pesan, function (ok) {
+            tampilToast(ok ? 'Pesan disalin.' : 'Gagal menyalin. Blok teks pesan lalu salin secara manual.', ok ? undefined : 'galat');
+          });
+        }
+      },
+      {
+        teks: 'Buka WhatsApp', kelas: 'tombol-utama',
+        klik: function () {
+          if (!r.tautan) { tampilToast('Tidak ada tautan WhatsApp untuk santri ini (nomor tidak valid atau pesan terlalu panjang).', 'galat'); return; }
+          bukaWa(r);
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.wa = renderWhatsApp;
+</script>

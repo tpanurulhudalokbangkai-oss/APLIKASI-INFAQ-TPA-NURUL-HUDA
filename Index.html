@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aplikasi Infaq TPA Nurul Huda</title>
+  <?!= include('CSS'); ?>
+  <?!= include('CSS_Master'); ?>
+</head>
+<body>
+
+  <!-- Layar memuat -->
+  <div id="layarMuat" class="layar-hijau">
+    <div class="spinner"></div>
+    <p class="teks-putih">Memuat aplikasi...</p>
+  </div>
+
+  <!-- Layar login -->
+  <div id="layarLogin" class="layar-hijau" hidden>
+    <section class="kartu">
+      <div class="logo">NH</div>
+      <h1>TPA Nurul Huda</h1>
+      <p class="sub">Aplikasi Pembayaran Infaq Bulanan</p>
+
+      <div id="pesanLogin" class="pesan" hidden></div>
+
+      <form id="formLogin" novalidate>
+        <label for="inputUsername">Username</label>
+        <input id="inputUsername" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="50">
+
+        <label for="inputPassword">Password</label>
+        <input id="inputPassword" type="password" autocomplete="current-password" maxlength="200">
+
+        <label class="centang"><input id="cekTampil" type="checkbox"> Tampilkan password</label>
+
+        <button id="tombolLogin" class="tombol" type="submit">Login</button>
+      </form>
+    </section>
+  </div>
+
+  <!-- Aplikasi (setelah login) -->
+  <div id="layarAplikasi" class="aplikasi" hidden>
+    <div id="latar" class="latar" hidden></div>
+
+    <aside id="sidebar" class="sidebar" aria-label="Menu utama">
+      <div class="sidebar-merek">
+        <div class="logo-kecil">NH</div>
+        <div>
+          <div class="merek-judul">TPA Nurul Huda</div>
+          <div class="merek-sub">Infaq Bulanan</div>
+        </div>
+      </div>
+      <nav id="menuUtama" class="menu"></nav>
+    </aside>
+
+    <div class="utama">
+      <header class="header-app">
+        <button id="tombolMenu" class="tombol-ikon" type="button" aria-label="Buka menu"></button>
+        <div class="header-judul">Infaq TPA Nurul Huda</div>
+        <div class="header-user">
+          <div id="avatar" class="avatar"></div>
+          <div class="user-teks">
+            <div id="namaPengguna" class="nama-pengguna"></div>
+            <div id="peranPengguna" class="peran"></div>
+          </div>
+        </div>
+      </header>
+
+      <main id="isiHalaman" class="isi-halaman"></main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <?!= include('JavaScript'); ?>
+  <?!= include('JS_Master'); ?>
+  <?!= include('JS_Pembayaran'); ?>
+  <?!= include('JS_Rekap'); ?>
+  <?!= include('JS_Tahunan'); ?>
+  <?!= include('JS_Laporan'); ?>
+  <?!= include('JS_WhatsApp'); ?>
+</body>
+</html>

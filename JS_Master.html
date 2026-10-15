@@ -1,0 +1,747 @@
+<script>
+  /* =========================================================
+     JS_Master.html - Tahap 5
+     Halaman Data Santri, Data Kelompok, dan Data Petugas.
+     Memakai fungsi dari JavaScript.html (STATE, $, el, tampilToast, dll).
+     ========================================================= */
+
+  /* Daftar halaman tambahan: HALAMAN['id-menu'] = fungsiPenggambar */
+  var HALAMAN = {};
+
+  (function () {
+    var bukaHalamanAsli = bukaHalaman;
+    bukaHalaman = function (id) {
+      var item = cariItemMenu(id);
+      if (item && HALAMAN[id]) {
+        STATE.halaman = id;
+        STATE.nomorPermintaan++;
+        tandaiMenuAktif(id);
+        HALAMAN[id](item);
+        window.scrollTo(0, 0);
+        return;
+      }
+      bukaHalamanAsli(id);
+    };
+
+    var keLayarLoginAsli = keLayarLogin;
+    keLayarLogin = function (pesan, jenis) {
+      tutupModal();
+      keLayarLoginAsli(pesan, jenis);
+    };
+  })();
+
+  /* =================== PEMBANTU UMUM =================== */
+  function panggilServer(nama, args, sukses, gagal) {
+    var runner = google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.berhasil) { sukses(res); return; }
+        if (res && res.kode === 'SESI_HABIS') { keLayarLogin(res.pesan, 'info'); return; }
+        if (gagal) { gagal(res && res.pesan ? res.pesan : 'Permintaan ditolak oleh server.'); }
+      })
+      .withFailureHandler(function () {
+        if (gagal) { gagal('Gagal terhubung ke server. Periksa koneksi internet Anda.'); }
+      });
+    runner[nama].apply(runner, [STATE.token].concat(args));
+  }
+
+  function hariIniIso() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function tampilTanggal(iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : String(iso || '');
+  }
+
+  function tampilWa(nomor) {
+    return nomor ? '+' + nomor : '-';
+  }
+
+  function buatPasswordAcak() {
+    var huruf = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    var hasil = '';
+    var acak = new Uint32Array(10);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(acak);
+    } else {
+      for (var j = 0; j < acak.length; j++) { acak[j] = Math.floor(Math.random() * 4294967295); }
+    }
+    for (var i = 0; i < acak.length; i++) { hasil += huruf.charAt(acak[i] % huruf.length); }
+    return hasil;
+  }
+
+  /* =================== MODAL =================== */
+  var modalAktif = null;
+
+  function tutupModal() {
+    if (modalAktif) {
+      if (modalAktif.parentNode) { modalAktif.parentNode.removeChild(modalAktif); }
+      modalAktif = null;
+    }
+  }
+
+  function bukaModal(judul, isi, aksi) {
+    tutupModal();
+    var latar = el('div', 'modal-latar');
+    var kotak = el('div', 'modal');
+    kotak.setAttribute('role', 'dialog');
+    kotak.setAttribute('aria-modal', 'true');
+    kotak.setAttribute('aria-label', judul);
+
+    var kepala = el('div', 'modal-kepala');
+    kepala.appendChild(el('h3', null, judul));
+    var tutup = el('button', 'tombol-tutup', '\u00D7');
+    tutup.type = 'button';
+    tutup.setAttribute('aria-label', 'Tutup');
+    tutup.addEventListener('click', tutupModal);
+    kepala.appendChild(tutup);
+
+    var badan = el('div', 'modal-badan');
+    var pesan = el('div', 'pesan galat');
+    pesan.hidden = true;
+    badan.appendChild(pesan);
+    badan.appendChild(isi);
+
+    var kaki = el('div', 'modal-kaki');
+    var tombolList = [];
+
+    var handle = {
+      tampilPesan: function (teks) {
+        pesan.textContent = teks || '';
+        pesan.hidden = !teks;
+      },
+      setSibuk: function (sibuk) {
+        tombolList.forEach(function (t) {
+          t.el.disabled = sibuk;
+          if (t.utama) { t.el.textContent = sibuk ? 'Memproses...' : t.teks; }
+        });
+        tutup.disabled = sibuk;
+      }
+    };
+
+    (aksi || []).forEach(function (a) {
+      var t = el('button', a.kelas || 'tombol-sekunder', a.teks);
+      t.type = 'button';
+      t.addEventListener('click', function () { a.klik(handle); });
+      kaki.appendChild(t);
+      tombolList.push({ el: t, teks: a.teks, utama: !!a.utama });
+    });
+
+    kotak.appendChild(kepala);
+    kotak.appendChild(badan);
+    kotak.appendChild(kaki);
+    latar.appendChild(kotak);
+    document.body.appendChild(latar);
+    modalAktif = latar;
+
+    var pertama = kotak.querySelector('input, select');
+    if (pertama) { pertama.focus(); }
+    return handle;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modalAktif) { tutupModal(); }
+  });
+
+  function konfirmasi(judul, pesan, teksYa, bahaya, onYa) {
+    bukaModal(judul, el('p', null, pesan), [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: teksYa,
+        kelas: bahaya ? 'tombol-utama bahaya' : 'tombol-utama',
+        utama: true,
+        klik: function (h) { h.tampilPesan(''); h.setSibuk(true); onYa(h); }
+      }
+    ]);
+  }
+
+  /* =================== KOMPONEN FORM DAN TABEL =================== */
+  function buatInput(id, tipe, nilai, maks) {
+    var i = el('input');
+    i.id = id;
+    i.type = tipe;
+    i.value = nilai || '';
+    if (maks) { i.maxLength = maks; }
+    i.autocomplete = 'off';
+    if (tipe === 'text') { i.spellcheck = false; }
+    return i;
+  }
+
+  function buatSelect(id, opsi, nilai) {
+    var s = el('select');
+    if (id) { s.id = id; }
+    opsi.forEach(function (o) {
+      var op = el('option', null, o.label);
+      op.value = o.nilai;
+      s.appendChild(op);
+    });
+    s.value = (nilai === undefined || nilai === null) ? '' : nilai;
+    return s;
+  }
+
+  function buatField(label, kontrol, bantuan, untukId) {
+    var wadah = el('div', 'field');
+    var lb = el('label', null, label);
+    var untuk = untukId || kontrol.id;
+    if (untuk) { lb.setAttribute('for', untuk); }
+    wadah.appendChild(lb);
+    wadah.appendChild(kontrol);
+    if (bantuan) { wadah.appendChild(el('div', 'bantuan', bantuan)); }
+    return wadah;
+  }
+
+  function buatFieldPassword(id, label, bantuan) {
+    var input = buatInput(id, 'password', '', 100);
+    input.autocomplete = 'new-password';
+    var cek;
+
+    var baris = el('div', 'baris-password');
+    baris.appendChild(input);
+    var acak = el('button', 'tombol-aksi', 'Buat acak');
+    acak.type = 'button';
+    acak.addEventListener('click', function () {
+      input.value = buatPasswordAcak();
+      input.type = 'text';
+      cek.checked = true;
+    });
+    baris.appendChild(acak);
+
+    var wadah = buatField(label, baris, bantuan, id);
+    var labelCek = el('label', 'centang');
+    cek = el('input');
+    cek.type = 'checkbox';
+    labelCek.appendChild(cek);
+    labelCek.appendChild(document.createTextNode(' Tampilkan password'));
+    cek.addEventListener('change', function () { input.type = cek.checked ? 'text' : 'password'; });
+    wadah.appendChild(labelCek);
+
+    return { wadah: wadah, input: input };
+  }
+
+  function buatTabelUmum(judulList, barisList, kelasTambahan) {
+    var gulir = el('div', 'tabel-gulir');
+    var tabel = el('table', 'tabel' + (kelasTambahan ? ' ' + kelasTambahan : ''));
+
+    var kepala = el('thead');
+    var barisKepala = el('tr');
+    judulList.forEach(function (j) { barisKepala.appendChild(el('th', null, j)); });
+    kepala.appendChild(barisKepala);
+    tabel.appendChild(kepala);
+
+    var badan = el('tbody');
+    barisList.forEach(function (sel) {
+      var tr = el('tr');
+      sel.forEach(function (isi) {
+        var td = el('td');
+        if (isi && isi.nodeType) { td.appendChild(isi); }
+        else { td.textContent = (isi === null || isi === undefined) ? '' : String(isi); }
+        tr.appendChild(td);
+      });
+      badan.appendChild(tr);
+    });
+    tabel.appendChild(badan);
+    gulir.appendChild(tabel);
+    return gulir;
+  }
+
+  function lencanaStatus(aktif) {
+    return el('span', 'lencana-status ' + (aktif ? 'aktif' : 'nonaktif'), aktif ? 'Aktif' : 'Nonaktif');
+  }
+
+  function tombolAksi(teks, klik, bahaya) {
+    var t = el('button', 'tombol-aksi' + (bahaya ? ' bahaya' : ''), teks);
+    t.type = 'button';
+    t.addEventListener('click', klik);
+    return t;
+  }
+
+  function buatKepala(judul, teksTombol, klikTombol) {
+    var isi = $('isiHalaman');
+    isi.innerHTML = '';
+    var kepala = el('div', 'kepala-halaman');
+    var kiri = el('div');
+    kiri.appendChild(el('h2', null, judul));
+    var sub = el('p', null, 'Memuat data...');
+    sub.id = 'subHalaman';
+    kiri.appendChild(sub);
+    kepala.appendChild(kiri);
+    if (teksTombol) {
+      var t = el('button', 'tombol-utama', teksTombol);
+      t.type = 'button';
+      t.addEventListener('click', klikTombol);
+      kepala.appendChild(t);
+    }
+    isi.appendChild(kepala);
+  }
+
+  function siapkanWadah() {
+    var wadah = el('div');
+    wadah.id = 'wadahHalaman';
+    $('isiHalaman').appendChild(wadah);
+    return wadah;
+  }
+
+  function tampilkanGalatHalaman(wadah, pesan, ulangi) {
+    wadah.innerHTML = '';
+    var kotak = el('div', 'panel galat-memuat');
+    kotak.appendChild(el('div', null, pesan));
+    var tombol = el('button', 'tombol-sekunder', 'Coba Lagi');
+    tombol.type = 'button';
+    tombol.addEventListener('click', function () { ulangi(); });
+    kotak.appendChild(tombol);
+    wadah.appendChild(kotak);
+  }
+
+  function simpanDanTutup(h, namaFungsi, args, muatUlang) {
+    panggilServer(namaFungsi, args, function (res) {
+      tutupModal();
+      tampilToast(res.pesan || 'Berhasil disimpan.');
+      muatUlang();
+    }, function (pesan) {
+      h.setSibuk(false);
+      h.tampilPesan(pesan);
+    });
+  }
+
+  /* =================== DATA SANTRI =================== */
+  var DATA_SANTRI = { santri: [], kelompok: [] };
+  var FILTER_SANTRI = { kata: '', kelompok: '', status: 'AKTIF' };
+  var SANTRI_SIAP = false;
+
+  function renderSantri(item) {
+    DATA_SANTRI = { santri: [], kelompok: [] };
+    FILTER_SANTRI = { kata: '', kelompok: '', status: 'AKTIF' };
+    SANTRI_SIAP = false;
+
+    buatKepala(item.label, '+ Tambah Santri', function () {
+      if (!SANTRI_SIAP) { tampilToast('Data masih dimuat.', 'galat'); return; }
+      bukaFormSantri(null);
+    });
+
+    var bar = el('div', 'toolbar');
+    var cari = buatInput('cariSantri', 'text', '', 60);
+    cari.placeholder = 'Cari nama, NIS, atau orang tua...';
+    cari.setAttribute('aria-label', 'Cari santri');
+    cari.addEventListener('input', function () { FILTER_SANTRI.kata = cari.value; gambarTabelSantri(); });
+
+    var pilKelompok = buatSelect('filterKelompok', [{ nilai: '', label: 'Semua kelompok' }], '');
+    pilKelompok.setAttribute('aria-label', 'Filter kelompok');
+    pilKelompok.addEventListener('change', function () { FILTER_SANTRI.kelompok = pilKelompok.value; gambarTabelSantri(); });
+
+    var pilStatus = buatSelect('filterStatus', [
+      { nilai: 'AKTIF', label: 'Santri aktif' },
+      { nilai: 'NONAKTIF', label: 'Santri nonaktif' },
+      { nilai: 'SEMUA', label: 'Semua status' }
+    ], 'AKTIF');
+    pilStatus.setAttribute('aria-label', 'Filter status');
+    pilStatus.addEventListener('change', function () { FILTER_SANTRI.status = pilStatus.value; gambarTabelSantri(); });
+
+    bar.appendChild(cari);
+    bar.appendChild(pilKelompok);
+    bar.appendChild(pilStatus);
+    $('isiHalaman').appendChild(bar);
+
+    siapkanWadah();
+    muatSantri();
+  }
+
+  function muatSantri() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    SANTRI_SIAP = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilDaftarSantri', [], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'santri') { return; }
+      DATA_SANTRI = res.data;
+      SANTRI_SIAP = true;
+
+      var pil = $('filterKelompok');
+      pil.innerHTML = '';
+      var semua = el('option', null, 'Semua kelompok');
+      semua.value = '';
+      pil.appendChild(semua);
+      DATA_SANTRI.kelompok.forEach(function (k) {
+        var op = el('option', null, k.nama + (k.aktif ? '' : ' (nonaktif)'));
+        op.value = k.id;
+        pil.appendChild(op);
+      });
+      pil.value = FILTER_SANTRI.kelompok;
+
+      gambarTabelSantri();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'santri') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatSantri);
+    });
+  }
+
+  function gambarTabelSantri() {
+    var wadah = $('wadahHalaman');
+    if (!wadah || !SANTRI_SIAP) { return; }
+
+    var kata = FILTER_SANTRI.kata.trim().toLowerCase();
+    var daftar = DATA_SANTRI.santri.filter(function (s) {
+      if (FILTER_SANTRI.status === 'AKTIF' && !s.aktif) { return false; }
+      if (FILTER_SANTRI.status === 'NONAKTIF' && s.aktif) { return false; }
+      if (FILTER_SANTRI.kelompok && s.idKelompok !== FILTER_SANTRI.kelompok) { return false; }
+      if (kata && (s.nama + ' ' + s.nis + ' ' + s.namaOrangTua).toLowerCase().indexOf(kata) < 0) { return false; }
+      return true;
+    });
+
+    $('subHalaman').textContent = 'Menampilkan ' + daftar.length + ' dari ' + DATA_SANTRI.santri.length + ' santri';
+
+    wadah.innerHTML = '';
+    var panel = el('div', 'panel');
+    if (!daftar.length) {
+      panel.appendChild(el('div', 'kosong', DATA_SANTRI.santri.length
+        ? 'Tidak ada santri yang cocok dengan pencarian atau filter.'
+        : 'Belum ada data santri. Klik "+ Tambah Santri" untuk memulai.'));
+    } else {
+      var baris = daftar.map(function (s, i) {
+        return [i + 1, s.nis, s.nama, s.namaKelompok, s.namaOrangTua, tampilWa(s.nomorWa), lencanaStatus(s.aktif), aksiSantri(s)];
+      });
+      panel.appendChild(buatTabelUmum(['No', 'NIS', 'Nama Santri', 'Kelompok', 'Orang Tua', 'WhatsApp', 'Status', 'Aksi'], baris, 'lebar'));
+    }
+    wadah.appendChild(panel);
+  }
+
+  function aksiSantri(s) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Detail', function () { bukaDetailSantri(s); }));
+    wadah.appendChild(tombolAksi('Edit', function () { bukaFormSantri(s); }));
+    wadah.appendChild(tombolAksi(s.aktif ? 'Nonaktifkan' : 'Aktifkan', function () {
+      konfirmasi(
+        s.aktif ? 'Nonaktifkan Santri' : 'Aktifkan Santri',
+        s.aktif
+          ? 'Nonaktifkan "' + s.nama + '"? Santri tidak akan muncul di daftar aktif. Data dan riwayat pembayaran tetap tersimpan.'
+          : 'Aktifkan kembali "' + s.nama + '"?',
+        s.aktif ? 'Ya, Nonaktifkan' : 'Ya, Aktifkan',
+        s.aktif,
+        function (h) { simpanDanTutup(h, 'ubahStatusSantri', [s.idSantri, !s.aktif], muatSantri); }
+      );
+    }, s.aktif));
+    return wadah;
+  }
+
+  function bukaDetailSantri(s) {
+    var daftar = el('dl', 'detail');
+    [
+      ['NIS', s.nis],
+      ['Nama santri', s.nama],
+      ['Kelompok', s.namaKelompok],
+      ['Nama orang tua', s.namaOrangTua],
+      ['WhatsApp', tampilWa(s.nomorWa)],
+      ['Tanggal masuk', tampilTanggal(s.tanggalMasuk)],
+      ['Status', s.aktif ? 'Aktif' : 'Nonaktif'],
+      ['Transaksi pembayaran sah', s.jumlahPembayaran + ' transaksi']
+    ].forEach(function (p) {
+      daftar.appendChild(el('dt', null, p[0]));
+      daftar.appendChild(el('dd', null, p[1]));
+    });
+    bukaModal('Detail Santri', daftar, [{ teks: 'Tutup', kelas: 'tombol-utama', klik: function () { tutupModal(); } }]);
+  }
+
+  function bukaFormSantri(s) {
+    var baru = !s;
+    var form = el('div');
+
+    var fNis = buatInput('fNis', 'text', s ? s.nis : '', 20);
+    var fNama = buatInput('fNama', 'text', s ? s.nama : '', 80);
+
+    var opsiKelompok = [{ nilai: '', label: '\u2014 Pilih kelompok \u2014' }];
+    DATA_SANTRI.kelompok.forEach(function (k) {
+      if (k.aktif || (s && k.id === s.idKelompok)) {
+        opsiKelompok.push({ nilai: k.id, label: k.nama + (k.aktif ? '' : ' (nonaktif)') });
+      }
+    });
+    var fKelompok = buatSelect('fKelompok', opsiKelompok, s ? s.idKelompok : '');
+
+    var fOrtu = buatInput('fOrtu', 'text', s ? s.namaOrangTua : '', 80);
+    var fWa = buatInput('fWa', 'tel', s ? s.nomorWa : '', 20);
+    var fTgl = buatInput('fTgl', 'date', s ? s.tanggalMasuk : hariIniIso());
+
+    form.appendChild(buatField('NIS', fNis));
+    form.appendChild(buatField('Nama Santri', fNama));
+    form.appendChild(buatField('Kelompok', fKelompok));
+    form.appendChild(buatField('Nama Orang Tua / Wali', fOrtu));
+    form.appendChild(buatField('Nomor WhatsApp Orang Tua', fWa, 'Contoh: 081234567890'));
+    form.appendChild(buatField('Tanggal Masuk', fTgl));
+
+    bukaModal(baru ? 'Tambah Santri' : 'Edit Santri', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Simpan', kelas: 'tombol-utama', utama: true,
+        klik: function (h) {
+          var data = {
+            idSantri: s ? s.idSantri : '',
+            nis: fNis.value,
+            nama: fNama.value,
+            idKelompok: fKelompok.value,
+            namaOrangTua: fOrtu.value,
+            nomorWa: fWa.value,
+            tanggalMasuk: fTgl.value
+          };
+          if (!data.nis.trim() || !data.nama.trim() || !data.idKelompok || !data.namaOrangTua.trim() || !data.nomorWa.trim() || !data.tanggalMasuk) {
+            h.tampilPesan('Semua kolom wajib diisi.');
+            return;
+          }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'simpanSantri', [data], muatSantri);
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.santri = renderSantri;
+
+  /* =================== DATA KELOMPOK =================== */
+  var DATA_KELOMPOK = { kelompok: [], petugas: [] };
+
+  function renderKelompok(item) {
+    DATA_KELOMPOK = { kelompok: [], petugas: [] };
+    var siap = false;
+
+    buatKepala(item.label, '+ Tambah Kelompok', function () {
+      if (!$('wadahHalaman') || !DATA_KELOMPOK.siap) { tampilToast('Data masih dimuat.', 'galat'); return; }
+      bukaFormKelompok(null);
+    });
+    siapkanWadah();
+    muatKelompok();
+  }
+
+  function muatKelompok() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_KELOMPOK.siap = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilDataKelompok', [], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'kelompok') { return; }
+      DATA_KELOMPOK = res.data;
+      DATA_KELOMPOK.siap = true;
+      gambarTabelKelompok();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'kelompok') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatKelompok);
+    });
+  }
+
+  function gambarTabelKelompok() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    $('subHalaman').textContent = DATA_KELOMPOK.kelompok.length + ' kelompok terdaftar';
+
+    wadah.innerHTML = '';
+    var panel = el('div', 'panel');
+    if (!DATA_KELOMPOK.kelompok.length) {
+      panel.appendChild(el('div', 'kosong', 'Belum ada kelompok. Klik "+ Tambah Kelompok" untuk memulai.'));
+    } else {
+      var baris = DATA_KELOMPOK.kelompok.map(function (k, i) {
+        return [i + 1, k.nama, k.namaPetugas || '\u2014 belum ditetapkan \u2014', k.jumlahSantriAktif, lencanaStatus(k.aktif), aksiKelompok(k)];
+      });
+      panel.appendChild(buatTabelUmum(['No', 'Nama Kelompok', 'Petugas Penanggung Jawab', 'Santri Aktif', 'Status', 'Aksi'], baris));
+    }
+    wadah.appendChild(panel);
+  }
+
+  function aksiKelompok(k) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Edit', function () { bukaFormKelompok(k); }));
+    wadah.appendChild(tombolAksi(k.aktif ? 'Nonaktifkan' : 'Aktifkan', function () {
+      konfirmasi(
+        k.aktif ? 'Nonaktifkan Kelompok' : 'Aktifkan Kelompok',
+        k.aktif
+          ? 'Nonaktifkan "' + k.nama + '"? Kelompok yang masih memiliki santri aktif tidak dapat dinonaktifkan.'
+          : 'Aktifkan kembali "' + k.nama + '"?',
+        k.aktif ? 'Ya, Nonaktifkan' : 'Ya, Aktifkan',
+        k.aktif,
+        function (h) { simpanDanTutup(h, 'ubahStatusKelompok', [k.idKelompok, !k.aktif], muatKelompok); }
+      );
+    }, k.aktif));
+    return wadah;
+  }
+
+  function bukaFormKelompok(k) {
+    var baru = !k;
+    var form = el('div');
+    var fNama = buatInput('fNamaKelompok', 'text', k ? k.nama : '', 50);
+
+    var opsi = [{ nilai: '', label: '\u2014 Belum ditetapkan \u2014' }];
+    DATA_KELOMPOK.petugas.forEach(function (p) {
+      if (p.aktif || (k && p.idPengguna === k.idPetugas)) {
+        opsi.push({ nilai: p.idPengguna, label: p.nama + ' (' + p.username + ')' + (p.aktif ? '' : ' - nonaktif') });
+      }
+    });
+    var fPetugas = buatSelect('fPetugasKelompok', opsi, k ? k.idPetugas : '');
+
+    form.appendChild(buatField('Nama Kelompok', fNama));
+    form.appendChild(buatField('Petugas Penanggung Jawab', fPetugas,
+      'Jika petugas ini memegang kelompok lain, penugasan lamanya dilepas. Jika kelompok ini sudah punya petugas lain, petugas lama dilepas dan tidak bisa login sampai ditetapkan kembali.'));
+
+    bukaModal(baru ? 'Tambah Kelompok' : 'Edit Kelompok', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Simpan', kelas: 'tombol-utama', utama: true,
+        klik: function (h) {
+          var data = { idKelompok: k ? k.idKelompok : '', nama: fNama.value, idPetugas: fPetugas.value };
+          if (!data.nama.trim()) { h.tampilPesan('Nama kelompok wajib diisi.'); return; }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'simpanKelompok', [data], muatKelompok);
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.kelompok = renderKelompok;
+
+  /* =================== DATA PETUGAS =================== */
+  var DATA_PETUGAS = { petugas: [], kelompok: [] };
+
+  function renderPetugas(item) {
+    DATA_PETUGAS = { petugas: [], kelompok: [] };
+    buatKepala(item.label, '+ Tambah Petugas', function () {
+      if (!DATA_PETUGAS.siap) { tampilToast('Data masih dimuat.', 'galat'); return; }
+      bukaFormPetugas(null);
+    });
+    siapkanWadah();
+    muatPetugas();
+  }
+
+  function muatPetugas() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_PETUGAS.siap = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilDataPetugas', [], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'petugas') { return; }
+      DATA_PETUGAS = res.data;
+      DATA_PETUGAS.siap = true;
+      gambarTabelPetugas();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'petugas') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatPetugas);
+    });
+  }
+
+  function gambarTabelPetugas() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    $('subHalaman').textContent = DATA_PETUGAS.petugas.length + ' akun petugas';
+
+    wadah.innerHTML = '';
+    var panel = el('div', 'panel');
+    if (!DATA_PETUGAS.petugas.length) {
+      panel.appendChild(el('div', 'kosong', 'Belum ada akun petugas. Buat kelompok terlebih dahulu, lalu klik "+ Tambah Petugas".'));
+    } else {
+      var baris = DATA_PETUGAS.petugas.map(function (p, i) {
+        return [i + 1, p.nama, p.username, p.namaKelompok || '\u2014 belum ada \u2014', lencanaStatus(p.aktif), aksiPetugas(p)];
+      });
+      panel.appendChild(buatTabelUmum(['No', 'Nama', 'Username', 'Kelompok', 'Status', 'Aksi'], baris));
+    }
+    wadah.appendChild(panel);
+  }
+
+  function aksiPetugas(p) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Edit', function () { bukaFormPetugas(p); }));
+    wadah.appendChild(tombolAksi('Reset Password', function () { bukaResetPassword(p); }));
+    wadah.appendChild(tombolAksi(p.aktif ? 'Nonaktifkan' : 'Aktifkan', function () {
+      konfirmasi(
+        p.aktif ? 'Nonaktifkan Petugas' : 'Aktifkan Petugas',
+        p.aktif
+          ? 'Nonaktifkan akun "' + p.nama + '"? Petugas tidak akan bisa login dan sesi yang sedang berjalan berakhir pada permintaan berikutnya.'
+          : 'Aktifkan kembali akun "' + p.nama + '"?',
+        p.aktif ? 'Ya, Nonaktifkan' : 'Ya, Aktifkan',
+        p.aktif,
+        function (h) { simpanDanTutup(h, 'ubahStatusPetugas', [p.idPengguna, !p.aktif], muatPetugas); }
+      );
+    }, p.aktif));
+    return wadah;
+  }
+
+  function opsiKelompokPetugas(p) {
+    var opsi = [{ nilai: '', label: '\u2014 Pilih kelompok \u2014' }];
+    DATA_PETUGAS.kelompok.forEach(function (k) {
+      if (k.aktif || (p && k.id === p.idKelompok)) {
+        opsi.push({ nilai: k.id, label: k.nama + (k.aktif ? '' : ' (nonaktif)') });
+      }
+    });
+    return opsi;
+  }
+
+  function bukaFormPetugas(p) {
+    var baru = !p;
+    var form = el('div');
+    var fNama = buatInput('fNamaPetugas', 'text', p ? p.nama : '', 60);
+    var fKelompok = buatSelect('fKelompokPetugas', opsiKelompokPetugas(p), p ? p.idKelompok : '');
+    var fUsername = null;
+    var fPassword = null;
+
+    form.appendChild(buatField('Nama Petugas', fNama));
+
+    if (baru) {
+      fUsername = buatInput('fUsernamePetugas', 'text', '', 30);
+      fUsername.autocapitalize = 'none';
+      form.appendChild(buatField('Username', fUsername, 'Huruf kecil, angka, titik, garis bawah, atau strip. 3 sampai 30 karakter.'));
+      fPassword = buatFieldPassword('fPasswordPetugas', 'Password Awal', 'Minimal 8 karakter. Sampaikan kepada petugas secara langsung.');
+      form.appendChild(fPassword.wadah);
+    } else {
+      var tetap = el('div', 'teks-tetap', p.username);
+      form.appendChild(buatField('Username (tidak dapat diubah)', tetap, null, ''));
+    }
+
+    form.appendChild(buatField('Kelompok', fKelompok,
+      'Jika kelompok ini sudah punya petugas lain, penugasan petugas lama dilepas.'));
+
+    bukaModal(baru ? 'Tambah Petugas' : 'Edit Petugas', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Simpan', kelas: 'tombol-utama', utama: true,
+        klik: function (h) {
+          var data = { idPengguna: p ? p.idPengguna : '', nama: fNama.value, idKelompok: fKelompok.value };
+          if (baru) {
+            data.username = fUsername.value;
+            data.password = fPassword.input.value;
+          }
+          if (!data.nama.trim() || !data.idKelompok || (baru && (!data.username.trim() || !data.password))) {
+            h.tampilPesan('Semua kolom wajib diisi.');
+            return;
+          }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'simpanPetugas', [data], muatPetugas);
+        }
+      }
+    ]);
+  }
+
+  function bukaResetPassword(p) {
+    var form = el('div');
+    form.appendChild(el('p', null, 'Atur password baru untuk "' + p.nama + '" (' + p.username + ').'));
+    var fPassword = buatFieldPassword('fPasswordBaru', 'Password Baru', 'Minimal 8 karakter. Percobaan login yang terkunci juga dibuka kembali.');
+    form.appendChild(fPassword.wadah);
+
+    bukaModal('Reset Password', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Simpan Password', kelas: 'tombol-utama', utama: true,
+        klik: function (h) {
+          var password = fPassword.input.value;
+          if (!password) { h.tampilPesan('Password baru wajib diisi.'); return; }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'resetPasswordPetugas', [p.idPengguna, password], muatPetugas);
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.petugas = renderPetugas;
+</script>

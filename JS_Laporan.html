@@ -1,0 +1,249 @@
+<style>
+  /* Tahap 9: gaya halaman ekspor */
+  .kotak-hasil { margin-top: 16px; padding: 16px; border-radius: 12px; background: var(--hijau-muda); border: 1px solid var(--hijau-sedang); }
+  .kotak-hasil h3 { margin: 0 0 6px; color: var(--hijau-tua); font-size: 16px; }
+  .kotak-hasil p { margin: 2px 0; font-size: 14px; word-break: break-all; }
+  .baris-tombol { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .proses-laporan { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 12px; background: var(--hijau-muda); color: var(--hijau-tua); font-size: 14px; }
+  .proses-laporan .spinner { margin: 0; flex-shrink: 0; width: 28px; height: 28px; border-width: 3px; }
+</style>
+
+<script>
+  /* =========================================================
+     JS_Laporan.html - Tahap 9
+     Halaman Laporan Excel dan Cetak PDF (khusus Admin).
+     ========================================================= */
+
+  var URL_BERKAS_TERAKHIR = null;
+  var nomorLaporan = 0;
+
+  var DAFTAR_JENIS_LAPORAN = {
+    XLSX: [
+      { nilai: 'PEMBAYARAN', label: 'Rekap Pembayaran' },
+      { nilai: 'TUNGGAKAN', label: 'Rekap Tunggakan' }
+    ],
+    PDF: [
+      { nilai: 'PEMBAYARAN', label: 'Laporan Pembayaran Bulanan' },
+      { nilai: 'TUNGGAKAN', label: 'Laporan Tunggakan' },
+      { nilai: 'TAHUNAN', label: 'Rekap Tahunan Seluruh Santri (Januari - Desember)' }
+    ]
+  };
+
+  /* =================== PEMBANTU BERKAS =================== */
+  function bersihkanUrlBerkas() {
+    if (URL_BERKAS_TERAKHIR) {
+      try { URL.revokeObjectURL(URL_BERKAS_TERAKHIR); } catch (e) { /* abaikan */ }
+      URL_BERKAS_TERAKHIR = null;
+    }
+  }
+
+  function buatUrlBerkas(base64, mime) {
+    var biner = atob(base64);
+    var bytes = new Uint8Array(biner.length);
+    for (var i = 0; i < biner.length; i++) { bytes[i] = biner.charCodeAt(i); }
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  }
+
+  function unduhBerkas(namaFile, url) {
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = namaFile;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { document.body.removeChild(a); }, 0);
+  }
+
+  /* =================== HALAMAN =================== */
+  function renderLaporan(item, format) {
+    bersihkanUrlBerkas();
+    buatKepala(item.label, null, null);
+    $('subHalaman').textContent = format === 'XLSX'
+      ? 'Unduh data dalam format Excel (.xlsx)'
+      : 'Buat laporan siap cetak dalam format PDF';
+
+    var wadah = siapkanWadah();
+    var nomor = ++STATE.nomorPermintaan;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilDataKelompok', [], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== item.id) { return; }
+      bangunFormLaporan(item, format, res.data.kelompok);
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== item.id) { return; }
+      tampilkanGalatHalaman(wadah, pesan, function () { renderLaporan(item, format); });
+    });
+  }
+
+  /* Membuat kolom filter sesuai jenis laporan; mengembalikan fungsi pembaca filter. */
+  function buatFilterLaporan(jenis, kelompok, wadah) {
+    var sekarang = new Date();
+    var tahunIni = sekarang.getFullYear();
+    var bulanIni = sekarang.getMonth() + 1;
+
+    var opsiKel = [{ nilai: '', label: 'Semua kelompok' }];
+    kelompok.forEach(function (k) { opsiKel.push({ nilai: k.idKelompok, label: k.nama + (k.aktif ? '' : ' (nonaktif)') }); });
+    var fKel = buatSelect('lapKelompok', opsiKel, '');
+
+    var opsiBulan = [];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+
+    if (jenis === 'PEMBAYARAN') {
+      var fTahun = buatSelect('lapTahun', [{ nilai: '0', label: 'Semua tahun' }].concat(opsiTahun(tahunIni - 3, tahunIni + 1)), String(tahunIni));
+      var fBulan = buatSelect('lapBulan', [{ nilai: '0', label: 'Semua bulan' }].concat(opsiBulan), String(bulanIni));
+      var fCari = buatInput('lapCari', 'text', '', 60);
+      fCari.placeholder = 'Kosongkan untuk semua santri';
+      wadah.appendChild(buatField('Tahun', fTahun));
+      wadah.appendChild(buatField('Bulan', fBulan));
+      wadah.appendChild(buatField('Kelompok', fKel));
+      wadah.appendChild(buatField('Cari nama atau NIS (opsional)', fCari));
+      return function () {
+        return { tahun: Number(fTahun.value), bulan: Number(fBulan.value), idKelompok: fKel.value, kata: fCari.value };
+      };
+    }
+
+    if (jenis === 'TUNGGAKAN') {
+      var tBulan = buatSelect('lapBulan', opsiBulan, String(bulanIni));
+      var tTahun = buatSelect('lapTahun', opsiTahun(tahunIni - 3, tahunIni + 1), String(tahunIni));
+      var tStatus = buatSelect('lapStatus', [
+        { nilai: 'SEMUA', label: 'Semua santri' },
+        { nilai: 'AKTIF', label: 'Santri aktif' },
+        { nilai: 'NONAKTIF', label: 'Santri nonaktif' }
+      ], 'SEMUA');
+      var tCari = buatInput('lapCari', 'text', '', 60);
+      tCari.placeholder = 'Kosongkan untuk semua santri';
+
+      var cek = el('input');
+      cek.type = 'checkbox';
+      cek.id = 'lapHanya';
+      cek.checked = true;
+      var labelCek = el('label', 'centang');
+      labelCek.appendChild(cek);
+      labelCek.appendChild(document.createTextNode(' Hanya santri yang menunggak'));
+
+      wadah.appendChild(buatField('Dihitung sampai bulan', tBulan));
+      wadah.appendChild(buatField('Tahun', tTahun));
+      wadah.appendChild(buatField('Kelompok', fKel));
+      wadah.appendChild(buatField('Status santri', tStatus));
+      wadah.appendChild(buatField('Cari nama atau NIS (opsional)', tCari));
+      var wadahCek = el('div', 'field');
+      wadahCek.appendChild(labelCek);
+      wadah.appendChild(wadahCek);
+      return function () {
+        return {
+          bulan: Number(tBulan.value), tahun: Number(tTahun.value), idKelompok: fKel.value,
+          status: tStatus.value, hanyaMenunggak: cek.checked, kata: tCari.value
+        };
+      };
+    }
+
+    /* TAHUNAN */
+    var yTahun = buatSelect('lapTahun', opsiTahun(tahunIni - 3, tahunIni + 1), String(tahunIni));
+    wadah.appendChild(buatField('Tahun', yTahun));
+    wadah.appendChild(buatField('Kelompok', fKel));
+    return function () {
+      return { tahun: Number(yTahun.value), idKelompok: fKel.value };
+    };
+  }
+
+  function bangunFormLaporan(item, format, kelompok) {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    wadah.innerHTML = '';
+
+    var panel = el('div', 'panel');
+    var daftarJenis = DAFTAR_JENIS_LAPORAN[format];
+    var pilJenis = buatSelect('lapJenis', daftarJenis, daftarJenis[0].nilai);
+    panel.appendChild(buatField('Jenis Laporan', pilJenis));
+
+    var wadahFilter = el('div', 'form-grid');
+    panel.appendChild(wadahFilter);
+
+    var wadahHasil = el('div');
+    var ambilFilter = null;
+
+    var tombol = el('button', 'tombol-utama', format === 'XLSX' ? 'Buat File Excel' : 'Buat File PDF');
+    tombol.type = 'button';
+    var aksi = el('div', 'aksi-form');
+    aksi.appendChild(tombol);
+    panel.appendChild(aksi);
+    panel.appendChild(wadahHasil);
+    wadah.appendChild(panel);
+
+    function pasangFilter() {
+      wadahFilter.innerHTML = '';
+      wadahHasil.innerHTML = '';
+      bersihkanUrlBerkas();
+      ambilFilter = buatFilterLaporan(pilJenis.value, kelompok, wadahFilter);
+    }
+
+    function tampilHasil(d) {
+      bersihkanUrlBerkas();
+      var url;
+      try {
+        url = buatUrlBerkas(d.base64, d.mime);
+      } catch (e) {
+        wadahHasil.innerHTML = '';
+        wadahHasil.appendChild(el('div', 'pesan galat', 'File berhasil dibuat tetapi tidak dapat disiapkan di browser. Coba lagi.'));
+        return;
+      }
+      URL_BERKAS_TERAKHIR = url;
+
+      wadahHasil.innerHTML = '';
+      var kotak = el('div', 'kotak-hasil');
+      kotak.appendChild(el('h3', null, 'File siap diunduh'));
+      kotak.appendChild(el('p', null, d.namaFile));
+      kotak.appendChild(el('p', 'catatan-kecil', Math.max(1, Math.round(d.ukuran / 1024)) + ' KB \u2022 ' + d.jumlahBaris + ' baris data'));
+
+      var baris = el('div', 'baris-tombol');
+      var tombolUnduh = el('button', 'tombol-utama', 'Unduh ' + (format === 'XLSX' ? 'Excel' : 'PDF'));
+      tombolUnduh.type = 'button';
+      tombolUnduh.addEventListener('click', function () { unduhBerkas(d.namaFile, url); });
+      baris.appendChild(tombolUnduh);
+
+      if (format === 'PDF') {
+        var tombolBuka = el('button', 'tombol-sekunder', 'Buka di Tab Baru');
+        tombolBuka.type = 'button';
+        tombolBuka.addEventListener('click', function () { window.open(url, '_blank'); });
+        baris.appendChild(tombolBuka);
+      }
+      kotak.appendChild(baris);
+      kotak.appendChild(el('p', 'catatan-kecil', 'Jika unduhan tidak mulai, periksa apakah browser memblokir unduhan dan izinkan.'));
+      wadahHasil.appendChild(kotak);
+    }
+
+    function jalankan() {
+      bersihkanUrlBerkas();
+      wadahHasil.innerHTML = '';
+
+      var proses = el('div', 'proses-laporan');
+      proses.appendChild(el('div', 'spinner gelap'));
+      proses.appendChild(el('div', null, 'Menyiapkan file... mohon tunggu, biasanya 10 sampai 30 detik. Jangan menutup halaman ini.'));
+      wadahHasil.appendChild(proses);
+
+      tombol.disabled = true;
+      pilJenis.disabled = true;
+      var nomorIni = ++nomorLaporan;
+
+      panggilServer('buatLaporan', [{ jenis: pilJenis.value, format: format, filter: ambilFilter() }], function (res) {
+        tombol.disabled = false;
+        pilJenis.disabled = false;
+        if (STATE.halaman !== item.id || nomorIni !== nomorLaporan) { return; }
+        tampilHasil(res.data);
+      }, function (pesan) {
+        tombol.disabled = false;
+        pilJenis.disabled = false;
+        if (STATE.halaman !== item.id || nomorIni !== nomorLaporan) { return; }
+        wadahHasil.innerHTML = '';
+        wadahHasil.appendChild(el('div', 'pesan galat', pesan));
+      });
+    }
+
+    pilJenis.addEventListener('change', pasangFilter);
+    tombol.addEventListener('click', jalankan);
+    pasangFilter();
+  }
+
+  HALAMAN.excel = function (item) { renderLaporan(item, 'XLSX'); };
+  HALAMAN.pdf = function (item) { renderLaporan(item, 'PDF'); };
+</script>
