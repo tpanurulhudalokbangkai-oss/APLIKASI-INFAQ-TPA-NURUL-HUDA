@@ -1,113 +1,749 @@
-/**
- * Pengaturan.gs
- * Pengaturan aplikasi. Saat ini: nominal infaq bulanan.
- *
- * Nominal disimpan sebagai riwayat per periode di sheet PENGATURAN:
- *   KUNCI = NOMINAL_INFAQ_yyyy-MM   NILAI = nominal
- * Artinya nominal itu berlaku mulai bulan tersebut dan seterusnya,
- * sampai ada periode yang lebih baru.
- */
+<style>
+  /* Tahap 6: gaya form pembayaran dan riwayat */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+  .form-grid .span2 { grid-column: 1 / -1; }
+  .form-grid .field { margin-bottom: 8px; }
 
-var AWALAN_NOMINAL = 'NOMINAL_INFAQ_';
-
-/**
- * Membaca seluruh riwayat nominal, diurutkan dari periode terlama.
- */
-function bacaRiwayatNominal_() {
-  var hasil = [];
-  bacaTabel_('PENGATURAN').forEach(function (r) {
-    var m = String(r.KUNCI).trim().match(/^NOMINAL_INFAQ_(\d{4})-(\d{2})$/);
-    if (!m) { return; }
-    var nilai = Number(r.NILAI);
-    if (!(nilai > 0)) { return; }
-    hasil.push({ tahun: Number(m[1]), bulan: Number(m[2]), nominal: nilai });
-  });
-  hasil.sort(function (a, b) { return (a.tahun * 12 + a.bulan) - (b.tahun * 12 + b.bulan); });
-  return hasil;
-}
-
-/**
- * Nominal yang berlaku pada suatu bulan: periode terbaru yang tidak melewati bulan itu.
- * Mengembalikan 0 jika belum ada nominal yang diatur.
- */
-function nominalBerlaku_(riwayat, bulan, tahun) {
-  var target = tahun * 12 + bulan;
-  var terbaik = -1;
-  var hasil = 0;
-  riwayat.forEach(function (r) {
-    var idx = r.tahun * 12 + r.bulan;
-    if (idx <= target && idx > terbaik) {
-      terbaik = idx;
-      hasil = r.nominal;
-    }
-  });
-  return hasil;
-}
-
-/**
- * Boleh dibaca semua pengguna yang login (dipakai untuk mengisi nominal di form pembayaran).
- */
-function ambilNominalInfaq(token) {
-  try {
-    wajibLogin_(token);
-    var zona = APP_CONFIG.ZONA_WAKTU;
-    var tahun = Number(Utilities.formatDate(new Date(), zona, 'yyyy'));
-    var bulan = Number(Utilities.formatDate(new Date(), zona, 'M'));
-    var riwayat = bacaRiwayatNominal_();
-    return {
-      berhasil: true,
-      data: {
-        riwayat: riwayat,
-        nominalSaatIni: nominalBerlaku_(riwayat, bulan, tahun),
-        bulan: bulan,
-        tahun: tahun
-      }
-    };
-  } catch (err) {
-    return galatKeRespons_(err);
+  .cari-santri { position: relative; }
+  .hasil-cari {
+    position: absolute; left: 0; right: 0; top: 100%;
+    z-index: 50;
+    margin-top: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--putih);
+    border: 1px solid var(--garis);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    padding: 4px;
   }
-}
+  .hasil-cari button {
+    display: block; width: 100%;
+    min-height: 46px;
+    padding: 8px 12px;
+    border: 0; border-radius: 8px;
+    background: transparent;
+    text-align: left;
+    font-family: inherit; font-size: 14px;
+    color: var(--teks);
+    cursor: pointer;
+  }
+  .hasil-cari button:hover { background: var(--hijau-muda); }
+  .info-kecil { color: var(--abu); font-size: 12px; }
+  .kosong-kecil { padding: 12px; color: var(--abu); font-size: 14px; }
 
-/**
- * Menambah atau mengubah nominal untuk satu periode (khusus Admin).
- */
-function simpanNominalInfaq(token, data) {
-  try {
-    var profil = wajibLogin_(token);
-    wajibAdmin_(profil);
+  .santri-terpilih {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--hijau-muda);
+    color: var(--hijau-tua);
+    font-weight: 600;
+  }
 
-    if (!data || typeof data !== 'object') {
-      throw buatGalat_('DATA_TIDAK_VALID', 'Data tidak lengkap.');
-    }
-    var tahunIni = Number(Utilities.formatDate(new Date(), APP_CONFIG.ZONA_WAKTU, 'yyyy'));
-    var nominal = keBilanganBulat_(data.nominal, 'Nominal infaq', 1000, 10000000);
-    var bulan = keBilanganBulat_(data.bulan, 'Bulan', 1, 12);
-    var tahun = keBilanganBulat_(data.tahun, 'Tahun', 2000, tahunIni + 2);
+  .grid-bulan { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .chip-bulan {
+    min-height: 42px;
+    border: 1px solid var(--garis);
+    border-radius: 8px;
+    background: var(--putih);
+    color: var(--teks);
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+  }
+  .chip-bulan:hover { background: var(--hijau-muda); }
+  .chip-bulan.lunas { background: var(--hijau-muda); color: var(--hijau-tua); border-color: var(--hijau-sedang); cursor: not-allowed; }
+  .chip-bulan.dipilih { background: var(--hijau-tua); color: var(--putih); border-color: var(--hijau-tua); }
 
-    var kunciData = AWALAN_NOMINAL + tahun + '-' + ('0' + bulan).slice(-2);
-    var keterangan = 'Nominal infaq per bulan, berlaku mulai ' + NAMA_BULAN[bulan - 1] + ' ' + tahun;
+  .aksi-form { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 
-    return dalamKunci_(function () {
-      var ada = cariBaris_(bacaTabel_('PENGATURAN'), 'KUNCI', kunciData);
-      var nilaiLama = ada ? Number(ada.NILAI) : 0;
+  .lencana-status.batal { background: var(--merah-muda); color: var(--merah); }
+  tr.baris-batal td { color: var(--abu); }
 
-      if (ada) {
-        perbaruiBaris_('PENGATURAN', ada._baris, { NILAI: String(nominal), KETERANGAN: keterangan }, true);
-      } else {
-        var posisi = tambahBaris_('PENGATURAN', { KUNCI: kunciData, NILAI: String(nominal), KETERANGAN: keterangan }, true);
-        pastikanBarisTersimpan_('PENGATURAN', posisi, 'KUNCI', kunciData);
-      }
+  .nominal-besar { font-size: 34px; font-weight: 700; color: var(--hijau-tua); }
 
-      catatRiwayatAman_(profil, 'PENGATURAN', kunciData, 'UBAH_NOMINAL',
-        'Nominal ' + formatRupiahServer_(nominal) + ' berlaku mulai ' + NAMA_BULAN[bulan - 1] + ' ' + tahun +
-        (nilaiLama ? ' (sebelumnya ' + formatRupiahServer_(nilaiLama) + ' untuk periode yang sama)' : ''));
+  @media (max-width: 700px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .grid-bulan { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
 
-      return {
-        berhasil: true,
-        pesan: 'Nominal infaq ' + formatRupiahServer_(nominal) + ' berlaku mulai ' + NAMA_BULAN[bulan - 1] + ' ' + tahun + ' berhasil disimpan.'
-      };
+<script>
+  /* =========================================================
+     JS_Pembayaran.html - Tahap 6
+     Halaman Input Pembayaran, Riwayat Pembayaran, dan Pengaturan.
+     Memakai fungsi dari JavaScript.html dan JS_Master.html.
+     ========================================================= */
+
+  var nomorStatusBulan = 0;
+
+  /* =================== PEMBANTU =================== */
+  function nominalStandar(riwayat, bulan, tahun) {
+    var target = tahun * 12 + bulan;
+    var terbaik = -1;
+    var hasil = 0;
+    riwayat.forEach(function (r) {
+      var idx = r.tahun * 12 + r.bulan;
+      if (idx <= target && idx > terbaik) { terbaik = idx; hasil = r.nominal; }
     });
-  } catch (err) {
-    return galatKeRespons_(err);
+    return hasil;
   }
-}
+
+  function lencanaTransaksi(status) {
+    var sah = status === 'SAH';
+    return el('span', 'lencana-status ' + (sah ? 'aktif' : 'batal'), sah ? 'Sah' : 'Dibatalkan');
+  }
+
+  function tambahBarisDetail(daftar, label, nilai) {
+    daftar.appendChild(el('dt', null, label));
+    daftar.appendChild(el('dd', null, nilai));
+  }
+
+  function opsiTahun(dari, sampai) {
+    var opsi = [];
+    for (var t = dari; t <= sampai; t++) { opsi.push({ nilai: String(t), label: String(t) }); }
+    return opsi;
+  }
+
+  /* =================== INPUT PEMBAYARAN =================== */
+  var DATA_INPUT = { santri: [], kelompok: [], nominal: [], siap: false };
+
+  function renderInput(item) {
+    DATA_INPUT = { santri: [], kelompok: [], nominal: [], siap: false };
+    buatKepala(item.label, null, null);
+    $('subHalaman').textContent = 'Catat pembayaran infaq bulanan santri';
+    var wadah = siapkanWadah();
+    var nomor = ++STATE.nomorPermintaan;
+    tampilkanMemuat(wadah);
+
+    function basi() { return nomor !== STATE.nomorPermintaan || STATE.halaman !== 'input'; }
+    function gagal(pesan) {
+      if (basi()) { return; }
+      tampilkanGalatHalaman(wadah, pesan, function () { renderInput(item); });
+    }
+
+    panggilServer('ambilDaftarSantri', [], function (res1) {
+      if (basi()) { return; }
+      DATA_INPUT.santri = res1.data.santri.filter(function (s) { return s.aktif; });
+      DATA_INPUT.kelompok = res1.data.kelompok.filter(function (k) { return k.aktif; });
+      panggilServer('ambilNominalInfaq', [], function (res2) {
+        if (basi()) { return; }
+        DATA_INPUT.nominal = res2.data.riwayat;
+        DATA_INPUT.siap = true;
+        bangunFormInput('');
+      }, gagal);
+    }, gagal);
+  }
+
+  function bangunFormInput(kelompokAwal) {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    wadah.innerHTML = '';
+
+    var admin = STATE.pengguna.role === 'ADMIN';
+    var sekarang = new Date();
+    var tahunIni = sekarang.getFullYear();
+    var bulanIni = sekarang.getMonth() + 1;
+    var terpilih = null;
+    var bulanDibayar = [];
+
+    var panel = el('div', 'panel');
+    if (!DATA_INPUT.nominal.length) {
+      panel.appendChild(el('div', 'pesan info',
+        'Nominal infaq standar belum diatur. ' + (admin ? 'Atur di menu Pengaturan. ' : 'Hubungi Admin. ') +
+        'Selama belum diatur, nominal wajib diisi manual.'));
+    }
+
+    /* ---- Kelompok ---- */
+    var opsiKel = admin ? [{ nilai: '', label: 'Semua kelompok' }] : [];
+    DATA_INPUT.kelompok.forEach(function (k) { opsiKel.push({ nilai: k.id, label: k.nama }); });
+    var awal = admin ? (kelompokAwal || '') : (DATA_INPUT.kelompok.length ? DATA_INPUT.kelompok[0].id : '');
+    var fKel = buatSelect('fInputKelompok', opsiKel, awal);
+    if (!admin) { fKel.disabled = true; }
+
+    /* ---- Santri (pencarian) ---- */
+    var cari = buatInput('fInputCari', 'text', '', 60);
+    cari.placeholder = 'Ketik nama atau NIS santri...';
+    var daftarHasil = el('div', 'hasil-cari');
+    daftarHasil.hidden = true;
+    var wadahCari = el('div', 'cari-santri');
+    wadahCari.appendChild(cari);
+    wadahCari.appendChild(daftarHasil);
+
+    var fieldSantri = buatField('Santri', wadahCari, 'Hanya santri aktif yang dapat dipilih.', 'fInputCari');
+    var boxTerpilih = el('div', 'santri-terpilih');
+    boxTerpilih.hidden = true;
+    var teksTerpilih = el('div');
+    var tombolGanti = tombolAksi('Ganti', function () { gantiSantri(); });
+    boxTerpilih.appendChild(teksTerpilih);
+    boxTerpilih.appendChild(tombolGanti);
+    fieldSantri.appendChild(boxTerpilih);
+
+    /* ---- Status bulan, tahun, bulan ---- */
+    var fTahun = buatSelect('fInputTahun', opsiTahun(tahunIni - 2, tahunIni + 1), String(tahunIni));
+    var fBulan = buatSelect('fInputBulan', [{ nilai: String(bulanIni), label: NAMA_BULAN[bulanIni - 1] }], String(bulanIni));
+
+    var gridBulan = el('div', 'grid-bulan');
+    var labelGrid = el('label', null, '');
+    var fieldGrid = el('div', 'field span2');
+    fieldGrid.appendChild(labelGrid);
+    fieldGrid.appendChild(gridBulan);
+    fieldGrid.hidden = true;
+
+    /* ---- Tanggal, nominal (opsional), penerima, catatan ---- */
+    var hariIni = hariIniIso();
+    var fTanggal = buatInput('fInputTanggal', 'date', hariIni);
+    fTanggal.max = hariIni;
+    var fNominal = buatInput('fInputNominal', 'number', '', 12);
+    fNominal.min = '1';
+    fNominal.step = '1';
+    fNominal.setAttribute('inputmode', 'numeric');
+    var bantuanNominal = el('div', 'bantuan', '');
+    var fPenerima = buatInput('fInputPenerima', 'text', STATE.pengguna.nama, 60);
+    var fCatatan = buatInput('fInputCatatan', 'text', '', 200);
+
+    var fieldNominal = buatField('Nominal Infaq (Rp) \u2014 opsional', fNominal, null, 'fInputNominal');
+    fieldNominal.appendChild(bantuanNominal);
+
+    var form = el('div', 'form-grid');
+    form.appendChild(buatField('Kelompok', fKel));
+    form.appendChild(fieldSantri);
+    form.appendChild(fieldGrid);
+    form.appendChild(buatField('Tahun Pembayaran', fTahun));
+    form.appendChild(buatField('Bulan Pembayaran', fBulan));
+    form.appendChild(buatField('Tanggal Pembayaran', fTanggal));
+    form.appendChild(fieldNominal);
+    form.appendChild(buatField('Nama Penerima Pembayaran', fPenerima));
+    form.appendChild(buatField('Catatan (opsional)', fCatatan));
+
+    var aksiForm = el('div', 'aksi-form span2');
+    var tombolBatal = el('button', 'tombol-sekunder', 'Batal');
+    tombolBatal.type = 'button';
+    tombolBatal.addEventListener('click', function () { bangunFormInput(fKel.value); });
+    var tombolSimpan = el('button', 'tombol-utama', 'Simpan');
+    tombolSimpan.type = 'button';
+    tombolSimpan.addEventListener('click', klikSimpan);
+    aksiForm.appendChild(tombolBatal);
+    aksiForm.appendChild(tombolSimpan);
+    form.appendChild(aksiForm);
+
+    panel.appendChild(form);
+    wadah.appendChild(panel);
+
+    /* ---- Fungsi di dalam form ---- */
+    function tampilHasilCari() {
+      var q = cari.value.trim().toLowerCase();
+      var idKel = fKel.value;
+      daftarHasil.innerHTML = '';
+      if (!q && !idKel) { daftarHasil.hidden = true; return; }
+
+      var cocok = DATA_INPUT.santri.filter(function (s) {
+        if (idKel && s.idKelompok !== idKel) { return false; }
+        return !q || (s.nama + ' ' + s.nis).toLowerCase().indexOf(q) >= 0;
+      }).slice(0, 30);
+
+      if (!cocok.length) {
+        daftarHasil.appendChild(el('div', 'kosong-kecil', 'Tidak ada santri aktif yang cocok.'));
+      }
+      cocok.forEach(function (s) {
+        var tombol = el('button');
+        tombol.type = 'button';
+        tombol.appendChild(el('strong', null, s.nama));
+        tombol.appendChild(el('span', 'info-kecil', '  \u00B7 NIS ' + s.nis + ' \u00B7 ' + s.namaKelompok));
+        tombol.addEventListener('click', function () { pilihSantri(s); });
+        daftarHasil.appendChild(tombol);
+      });
+      daftarHasil.hidden = false;
+    }
+
+    function pilihSantri(s) {
+      terpilih = s;
+      teksTerpilih.textContent = s.nama + ' (NIS ' + s.nis + ') \u2014 ' + s.namaKelompok;
+      boxTerpilih.hidden = false;
+      wadahCari.hidden = true;
+      daftarHasil.hidden = true;
+      if (admin) { fKel.value = s.idKelompok; }
+      muatStatusBulan();
+    }
+
+    function gantiSantri() {
+      terpilih = null;
+      boxTerpilih.hidden = true;
+      wadahCari.hidden = false;
+      cari.value = '';
+      muatStatusBulan();
+      cari.focus();
+    }
+
+    function bulanAwal() {
+      var th = Number(fTahun.value);
+      if (th === tahunIni && bulanDibayar.indexOf(bulanIni) < 0) { return bulanIni; }
+      for (var b = 1; b <= 12; b++) {
+        if (bulanDibayar.indexOf(b) < 0) { return b; }
+      }
+      return bulanIni;
+    }
+
+    function perbaruiOpsiBulan(pilihAwal) {
+      var dipilih = Number(fBulan.value) || bulanIni;
+      fBulan.innerHTML = '';
+      for (var b = 1; b <= 12; b++) {
+        var sudah = bulanDibayar.indexOf(b) >= 0;
+        var op = el('option', null, NAMA_BULAN[b - 1] + (sudah ? ' (sudah dibayar)' : ''));
+        op.value = String(b);
+        op.disabled = sudah;
+        fBulan.appendChild(op);
+      }
+      if (pilihAwal || bulanDibayar.indexOf(dipilih) >= 0) { dipilih = bulanAwal(); }
+      fBulan.value = String(dipilih);
+    }
+
+    function gambarBulan() {
+      fieldGrid.hidden = !terpilih;
+      if (!terpilih) { return; }
+      labelGrid.textContent = 'Status pembayaran tahun ' + fTahun.value + ' (klik bulan yang belum dibayar untuk memilih)';
+      gridBulan.innerHTML = '';
+      for (var b = 1; b <= 12; b++) {
+        (function (bln) {
+          var sudah = bulanDibayar.indexOf(bln) >= 0;
+          var kelas = 'chip-bulan' + (sudah ? ' lunas' : '') + (String(bln) === fBulan.value ? ' dipilih' : '');
+          var chip = el('button', kelas, SINGKAT_BULAN[bln - 1] + (sudah ? ' \u2713' : ''));
+          chip.type = 'button';
+          chip.disabled = sudah;
+          chip.addEventListener('click', function () {
+            fBulan.value = String(bln);
+            gambarBulan();
+            perbaruiNominal();
+          });
+          gridBulan.appendChild(chip);
+        })(b);
+      }
+    }
+
+    /* Nominal bersifat opsional: kolom dibiarkan kosong dan hanya diberi petunjuk. */
+    function perbaruiNominal() {
+      var standar = nominalStandar(DATA_INPUT.nominal, Number(fBulan.value), Number(fTahun.value));
+      if (standar > 0) {
+        fNominal.placeholder = 'Otomatis ' + formatRupiah(standar);
+        bantuanNominal.textContent = 'Kosongkan untuk memakai nominal standar periode ini (' + formatRupiah(standar) + '), atau isi nominal lain.';
+      } else {
+        fNominal.placeholder = '';
+        bantuanNominal.textContent = 'Nominal standar periode ini belum diatur, sehingga nominal wajib diisi.';
+      }
+    }
+
+    function muatStatusBulan() {
+      if (!terpilih) {
+        bulanDibayar = [];
+        perbaruiOpsiBulan(true);
+        gambarBulan();
+        perbaruiNominal();
+        return;
+      }
+      var nomor = ++nomorStatusBulan;
+      var idSantri = terpilih.idSantri;
+      panggilServer('ambilStatusBayarSantri', [idSantri, Number(fTahun.value)], function (res) {
+        if (nomor !== nomorStatusBulan || !terpilih || terpilih.idSantri !== idSantri || STATE.halaman !== 'input') { return; }
+        bulanDibayar = res.data.bulanDibayar;
+        perbaruiOpsiBulan(true);
+        gambarBulan();
+        perbaruiNominal();
+      }, function (pesan) {
+        if (nomor !== nomorStatusBulan || STATE.halaman !== 'input') { return; }
+        tampilToast(pesan, 'galat');
+      });
+    }
+
+    function klikSimpan() {
+      if (!terpilih) { tampilToast('Pilih santri terlebih dahulu.', 'galat'); return; }
+
+      var bulan = Number(fBulan.value);
+      var tahun = Number(fTahun.value);
+      var tanggalBayar = fTanggal.value;
+      var nominalTeks = fNominal.value.trim();
+      var penerima = fPenerima.value;
+      var catatan = fCatatan.value;
+      var standar = nominalStandar(DATA_INPUT.nominal, bulan, tahun);
+
+      if (!tanggalBayar) { tampilToast('Tanggal pembayaran wajib diisi.', 'galat'); return; }
+      if (!penerima.trim()) { tampilToast('Nama penerima wajib diisi.', 'galat'); return; }
+
+      var nominalDipakai;
+      var otomatis = (nominalTeks === '');
+      if (otomatis) {
+        if (!(standar > 0)) {
+          tampilToast('Nominal standar untuk ' + NAMA_BULAN[bulan - 1] + ' ' + tahun + ' belum diatur. Isi nominal secara manual.', 'galat');
+          return;
+        }
+        nominalDipakai = standar;
+      } else {
+        if (!/^\d+$/.test(nominalTeks) || Number(nominalTeks) < 1) {
+          tampilToast('Nominal harus berupa angka bulat positif, atau kosongkan untuk memakai nominal standar.', 'galat');
+          return;
+        }
+        nominalDipakai = Number(nominalTeks);
+      }
+
+      /* Nominal kosong dikirim kosong: server yang menentukan nominal standar. */
+      var data = {
+        idSantri: terpilih.idSantri,
+        bulan: bulan,
+        tahun: tahun,
+        tanggalBayar: tanggalBayar,
+        nominal: nominalTeks,
+        penerima: penerima,
+        catatan: catatan
+      };
+
+      var isi = el('div');
+      var ringkas = el('dl', 'detail');
+      tambahBarisDetail(ringkas, 'Santri', terpilih.nama + ' (NIS ' + terpilih.nis + ')');
+      tambahBarisDetail(ringkas, 'Kelompok', terpilih.namaKelompok);
+      tambahBarisDetail(ringkas, 'Periode', NAMA_BULAN[bulan - 1] + ' ' + tahun);
+      tambahBarisDetail(ringkas, 'Tanggal bayar', tampilTanggal(tanggalBayar));
+      tambahBarisDetail(ringkas, 'Nominal', formatRupiah(nominalDipakai) + (otomatis ? ' (nominal standar)' : ''));
+      tambahBarisDetail(ringkas, 'Penerima', penerima.trim());
+      if (catatan.trim()) { tambahBarisDetail(ringkas, 'Catatan', catatan.trim()); }
+      isi.appendChild(el('p', null, 'Periksa data berikut sebelum disimpan:'));
+      isi.appendChild(ringkas);
+      if (!otomatis && standar > 0 && nominalDipakai !== standar) {
+        var peringatan = el('div', 'pesan info', 'Perhatian: nominal ini berbeda dari nominal standar (' + formatRupiah(standar) + ').');
+        peringatan.style.marginTop = '12px';
+        isi.appendChild(peringatan);
+      }
+
+      bukaModal('Konfirmasi Pembayaran', isi, [
+        { teks: 'Periksa Lagi', klik: function () { tutupModal(); } },
+        {
+          teks: 'Ya, Simpan Pembayaran', kelas: 'tombol-utama', utama: true,
+          klik: function (h) {
+            h.tampilPesan('');
+            h.setSibuk(true);
+            panggilServer('simpanPembayaran', [data], function (res) {
+              tutupModal();
+              tampilToast(res.pesan);
+              bangunFormInput(fKel.value);
+            }, function (pesan) {
+              h.setSibuk(false);
+              h.tampilPesan(pesan);
+              muatStatusBulan();
+            });
+          }
+        }
+      ]);
+    }
+
+    /* ---- Pendengar peristiwa ---- */
+    cari.addEventListener('input', tampilHasilCari);
+    cari.addEventListener('focus', tampilHasilCari);
+    cari.addEventListener('blur', function () { setTimeout(function () { daftarHasil.hidden = true; }, 250); });
+    fKel.addEventListener('change', function () {
+      if (terpilih && fKel.value && terpilih.idKelompok !== fKel.value) { gantiSantri(); }
+      else if (!terpilih) { tampilHasilCari(); }
+    });
+    fTahun.addEventListener('change', function () { muatStatusBulan(); });
+    fBulan.addEventListener('change', function () { gambarBulan(); perbaruiNominal(); });
+
+    muatStatusBulan();
+  }
+
+  HALAMAN.input = renderInput;
+
+  /* =================== RIWAYAT PEMBAYARAN =================== */
+  var DATA_RIWAYAT = { transaksi: [], tahunTersedia: [], kelompok: [], bolehBatal: false, tahunDipilih: 0, siap: false };
+  var FILTER_RIWAYAT = { bulan: '', kelompok: '', status: 'SAH', kata: '' };
+
+  function renderRiwayat(item) {
+    var admin = STATE.pengguna.role === 'ADMIN';
+    var tahunIni = new Date().getFullYear();
+    FILTER_RIWAYAT = { bulan: '', kelompok: '', status: 'SAH', kata: '' };
+    DATA_RIWAYAT = { transaksi: [], tahunTersedia: [], kelompok: [], bolehBatal: false, tahunDipilih: tahunIni, siap: false };
+
+    buatKepala(item.label, null, null);
+
+    var bar = el('div', 'toolbar');
+
+    var pilTahun = buatSelect('filterTahunR', [{ nilai: String(tahunIni), label: 'Tahun ' + tahunIni }], String(tahunIni));
+    pilTahun.setAttribute('aria-label', 'Filter tahun');
+    pilTahun.addEventListener('change', function () { muatRiwayat(Number(pilTahun.value)); });
+
+    var opsiBulan = [{ nilai: '', label: 'Semua bulan' }];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+    var pilBulan = buatSelect('filterBulanR', opsiBulan, '');
+    pilBulan.setAttribute('aria-label', 'Filter bulan');
+    pilBulan.addEventListener('change', function () { FILTER_RIWAYAT.bulan = pilBulan.value; gambarRiwayat(); });
+
+    var pilKel = buatSelect('filterKelompokR', [{ nilai: '', label: 'Semua kelompok' }], '');
+    pilKel.setAttribute('aria-label', 'Filter kelompok');
+    pilKel.addEventListener('change', function () { FILTER_RIWAYAT.kelompok = pilKel.value; gambarRiwayat(); });
+
+    var pilStatus = buatSelect('filterStatusR', [
+      { nilai: 'SAH', label: 'Transaksi sah' },
+      { nilai: 'DIBATALKAN', label: 'Dibatalkan' },
+      { nilai: 'SEMUA', label: 'Semua status' }
+    ], 'SAH');
+    pilStatus.setAttribute('aria-label', 'Filter status');
+    pilStatus.addEventListener('change', function () { FILTER_RIWAYAT.status = pilStatus.value; gambarRiwayat(); });
+
+    var cari = buatInput('cariRiwayat', 'text', '', 60);
+    cari.placeholder = 'Cari nama, NIS, atau penerima...';
+    cari.setAttribute('aria-label', 'Cari transaksi');
+    cari.addEventListener('input', function () { FILTER_RIWAYAT.kata = cari.value; gambarRiwayat(); });
+
+    bar.appendChild(pilTahun);
+    bar.appendChild(pilBulan);
+    if (admin) { bar.appendChild(pilKel); }
+    bar.appendChild(pilStatus);
+    bar.appendChild(cari);
+    $('isiHalaman').appendChild(bar);
+
+    siapkanWadah();
+    muatRiwayat(tahunIni);
+  }
+
+  function muatRiwayat(tahun) {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_RIWAYAT.siap = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilRiwayatPembayaran', [tahun], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'riwayat') { return; }
+      DATA_RIWAYAT = res.data;
+      DATA_RIWAYAT.siap = true;
+      isiFilterRiwayat();
+      gambarRiwayat();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'riwayat') { return; }
+      tampilkanGalatHalaman(wadah, pesan, function () { muatRiwayat(tahun); });
+    });
+  }
+
+  function isiFilterRiwayat() {
+    var pilTahun = $('filterTahunR');
+    pilTahun.innerHTML = '';
+    var semua = el('option', null, 'Semua tahun');
+    semua.value = '0';
+    pilTahun.appendChild(semua);
+    DATA_RIWAYAT.tahunTersedia.forEach(function (t) {
+      var op = el('option', null, 'Tahun ' + t);
+      op.value = String(t);
+      pilTahun.appendChild(op);
+    });
+    pilTahun.value = String(DATA_RIWAYAT.tahunDipilih);
+
+    /* PERBAIKAN: kotak filter kelompok hanya ada pada akun Admin.
+       Pada akun Petugas kotak ini tidak dipasang, sehingga harus diperiksa dulu
+       agar halaman tidak macet di "Memuat data...". */
+    var pilKel = $('filterKelompokR');
+    if (pilKel) {
+      pilKel.innerHTML = '';
+      var semuaKel = el('option', null, 'Semua kelompok');
+      semuaKel.value = '';
+      pilKel.appendChild(semuaKel);
+      DATA_RIWAYAT.kelompok.forEach(function (k) {
+        var op = el('option', null, k.nama);
+        op.value = k.id;
+        pilKel.appendChild(op);
+      });
+      pilKel.value = FILTER_RIWAYAT.kelompok;
+    }
+  }
+
+  function gambarRiwayat() {
+    var wadah = $('wadahHalaman');
+    if (!wadah || !DATA_RIWAYAT.siap) { return; }
+
+    var kata = FILTER_RIWAYAT.kata.trim().toLowerCase();
+    var daftar = DATA_RIWAYAT.transaksi.filter(function (t) {
+      if (FILTER_RIWAYAT.status !== 'SEMUA' && t.status !== FILTER_RIWAYAT.status) { return false; }
+      if (FILTER_RIWAYAT.bulan && String(t.bulan) !== FILTER_RIWAYAT.bulan) { return false; }
+      if (FILTER_RIWAYAT.kelompok && t.idKelompok !== FILTER_RIWAYAT.kelompok) { return false; }
+      if (kata && (t.nama + ' ' + t.nis + ' ' + t.penerima).toLowerCase().indexOf(kata) < 0) { return false; }
+      return true;
+    });
+
+    var total = 0;
+    daftar.forEach(function (t) { if (t.status === 'SAH') { total += t.nominal; } });
+    $('subHalaman').textContent = 'Menampilkan ' + daftar.length + ' transaksi \u2022 Total sah: ' + formatRupiah(total);
+
+    wadah.innerHTML = '';
+    var panel = el('div', 'panel');
+    if (!daftar.length) {
+      panel.appendChild(el('div', 'kosong', DATA_RIWAYAT.transaksi.length
+        ? 'Tidak ada transaksi yang cocok dengan filter.'
+        : 'Belum ada pembayaran tercatat.'));
+    } else {
+      var baris = daftar.map(function (t, i) {
+        return [
+          i + 1, tampilTanggal(t.tanggal), t.nis, t.nama, t.namaKelompok,
+          NAMA_BULAN[t.bulan - 1] + ' ' + t.tahun, formatRupiah(t.nominal), t.penerima,
+          lencanaTransaksi(t.status), aksiRiwayat(t)
+        ];
+      });
+      var tabel = buatTabelUmum(['No', 'Tanggal Bayar', 'NIS', 'Santri', 'Kelompok', 'Periode', 'Nominal', 'Penerima', 'Status', 'Aksi'], baris, 'lebar');
+      var barisTabel = tabel.querySelectorAll('tbody tr');
+      daftar.forEach(function (t, i) { if (t.status !== 'SAH') { barisTabel[i].classList.add('baris-batal'); } });
+      panel.appendChild(tabel);
+    }
+    wadah.appendChild(panel);
+  }
+
+  function aksiRiwayat(t) {
+    var wadah = el('div', 'aksi');
+    wadah.appendChild(tombolAksi('Detail', function () { bukaDetailTransaksi(t); }));
+    if (DATA_RIWAYAT.bolehBatal && t.status === 'SAH') {
+      wadah.appendChild(tombolAksi('Batalkan', function () { bukaBatalTransaksi(t); }, true));
+    }
+    return wadah;
+  }
+
+  function bukaDetailTransaksi(t) {
+    var daftar = el('dl', 'detail');
+    tambahBarisDetail(daftar, 'ID transaksi', t.idPembayaran);
+    tambahBarisDetail(daftar, 'Santri', t.nama + ' (NIS ' + t.nis + ')');
+    tambahBarisDetail(daftar, 'Kelompok', t.namaKelompok);
+    tambahBarisDetail(daftar, 'Periode', NAMA_BULAN[t.bulan - 1] + ' ' + t.tahun);
+    tambahBarisDetail(daftar, 'Tanggal bayar', tampilTanggal(t.tanggal));
+    tambahBarisDetail(daftar, 'Nominal', formatRupiah(t.nominal));
+    tambahBarisDetail(daftar, 'Penerima', t.penerima);
+    tambahBarisDetail(daftar, 'Dicatat oleh', t.dicatatOleh || '-');
+    tambahBarisDetail(daftar, 'Status', t.status === 'SAH' ? 'Sah' : 'Dibatalkan');
+    tambahBarisDetail(daftar, 'Catatan', t.catatan || '-');
+    bukaModal('Detail Pembayaran', daftar, [{ teks: 'Tutup', kelas: 'tombol-utama', klik: function () { tutupModal(); } }]);
+  }
+
+  function bukaBatalTransaksi(t) {
+    var isi = el('div');
+    var ringkas = el('dl', 'detail');
+    tambahBarisDetail(ringkas, 'Santri', t.nama + ' (NIS ' + t.nis + ')');
+    tambahBarisDetail(ringkas, 'Periode', NAMA_BULAN[t.bulan - 1] + ' ' + t.tahun);
+    tambahBarisDetail(ringkas, 'Nominal', formatRupiah(t.nominal));
+    tambahBarisDetail(ringkas, 'Tanggal bayar', tampilTanggal(t.tanggal));
+    isi.appendChild(ringkas);
+
+    var peringatan = el('div', 'pesan info',
+      'Transaksi tidak dihapus. Statusnya menjadi DIBATALKAN dan tercatat pada riwayat perubahan. ' +
+      'Untuk koreksi, batalkan transaksi yang keliru lalu input ulang yang benar.');
+    peringatan.style.margin = '12px 0';
+    isi.appendChild(peringatan);
+
+    var fAlasan = buatInput('fAlasanBatal', 'text', '', 200);
+    isi.appendChild(buatField('Alasan pembatalan (wajib)', fAlasan, 'Minimal 5 karakter. Contoh: salah input nominal.'));
+
+    bukaModal('Batalkan Transaksi', isi, [
+      { teks: 'Kembali', klik: function () { tutupModal(); } },
+      {
+        teks: 'Ya, Batalkan Transaksi', kelas: 'tombol-utama bahaya', utama: true,
+        klik: function (h) {
+          var alasan = fAlasan.value.trim();
+          if (alasan.length < 5) { h.tampilPesan('Alasan pembatalan wajib diisi, minimal 5 karakter.'); return; }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'batalkanPembayaran', [t.idPembayaran, alasan], function () {
+            muatRiwayat(DATA_RIWAYAT.tahunDipilih);
+          });
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.riwayat = renderRiwayat;
+
+  /* =================== PENGATURAN =================== */
+  var DATA_PENGATURAN = { riwayat: [], nominalSaatIni: 0, bulan: 0, tahun: 0, siap: false };
+
+  function renderPengaturan(item) {
+    DATA_PENGATURAN = { riwayat: [], nominalSaatIni: 0, bulan: 0, tahun: 0, siap: false };
+    buatKepala(item.label, 'Ubah Nominal', function () {
+      if (!DATA_PENGATURAN.siap) { tampilToast('Data masih dimuat.', 'galat'); return; }
+      bukaFormNominal();
+    });
+    $('subHalaman').textContent = 'Pengaturan aplikasi (khusus Admin)';
+    siapkanWadah();
+    muatPengaturan();
+  }
+
+  function muatPengaturan() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    var nomor = ++STATE.nomorPermintaan;
+    DATA_PENGATURAN.siap = false;
+    tampilkanMemuat(wadah);
+
+    panggilServer('ambilNominalInfaq', [], function (res) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'pengaturan') { return; }
+      DATA_PENGATURAN = res.data;
+      DATA_PENGATURAN.siap = true;
+      gambarPengaturan();
+    }, function (pesan) {
+      if (nomor !== STATE.nomorPermintaan || STATE.halaman !== 'pengaturan') { return; }
+      tampilkanGalatHalaman(wadah, pesan, muatPengaturan);
+    });
+  }
+
+  function gambarPengaturan() {
+    var wadah = $('wadahHalaman');
+    if (!wadah) { return; }
+    wadah.innerHTML = '';
+
+    var panelSaatIni = el('div', 'panel');
+    panelSaatIni.appendChild(el('h3', 'panel-judul', 'Nominal Infaq Bulanan'));
+    panelSaatIni.appendChild(el('div', 'nominal-besar', DATA_PENGATURAN.nominalSaatIni > 0 ? formatRupiah(DATA_PENGATURAN.nominalSaatIni) : 'Belum diatur'));
+    panelSaatIni.appendChild(el('div', 'catatan-kecil', 'Berlaku untuk ' + NAMA_BULAN[DATA_PENGATURAN.bulan - 1] + ' ' + DATA_PENGATURAN.tahun));
+    wadah.appendChild(panelSaatIni);
+
+    var panelRiwayat = el('div', 'panel');
+    panelRiwayat.appendChild(el('h3', 'panel-judul', 'Riwayat Nominal per Periode'));
+    if (!DATA_PENGATURAN.riwayat.length) {
+      panelRiwayat.appendChild(el('div', 'kosong', 'Belum ada nominal yang diatur. Klik "Ubah Nominal" untuk mengaturnya.'));
+    } else {
+      var urut = DATA_PENGATURAN.riwayat.slice().reverse();
+      var baris = urut.map(function (r) {
+        return [NAMA_BULAN[r.bulan - 1] + ' ' + r.tahun, formatRupiah(r.nominal)];
+      });
+      panelRiwayat.appendChild(buatTabelUmum(['Berlaku Mulai', 'Nominal per Bulan'], baris));
+    }
+    wadah.appendChild(panelRiwayat);
+  }
+
+  function bukaFormNominal() {
+    var tahunIni = DATA_PENGATURAN.tahun;
+    var form = el('div');
+    var fNominal = buatInput('fNominalBaru', 'number', DATA_PENGATURAN.nominalSaatIni > 0 ? String(DATA_PENGATURAN.nominalSaatIni) : '', 9);
+    fNominal.min = '1000';
+    fNominal.step = '1';
+    fNominal.setAttribute('inputmode', 'numeric');
+
+    var opsiBulan = [];
+    NAMA_BULAN.forEach(function (n, i) { opsiBulan.push({ nilai: String(i + 1), label: n }); });
+    var fBulan = buatSelect('fNominalBulan', opsiBulan, String(DATA_PENGATURAN.bulan));
+    var fTahun = buatSelect('fNominalTahun', opsiTahun(tahunIni - 1, tahunIni + 2), String(tahunIni));
+
+    form.appendChild(buatField('Nominal Infaq per Bulan (Rp)', fNominal));
+    form.appendChild(buatField('Berlaku Mulai Bulan', fBulan));
+    form.appendChild(buatField('Berlaku Mulai Tahun', fTahun,
+      'Nominal ini berlaku dari periode tersebut sampai ada periode yang lebih baru. ' +
+      'Mengubah periode yang sudah lewat memengaruhi perhitungan tunggakan.'));
+
+    bukaModal('Ubah Nominal Infaq', form, [
+      { teks: 'Batal', klik: function () { tutupModal(); } },
+      {
+        teks: 'Simpan', kelas: 'tombol-utama', utama: true,
+        klik: function (h) {
+          var nominal = fNominal.value.trim();
+          if (!/^\d+$/.test(nominal) || Number(nominal) < 1000) {
+            h.tampilPesan('Nominal harus berupa angka bulat, minimal 1000.');
+            return;
+          }
+          h.tampilPesan('');
+          h.setSibuk(true);
+          simpanDanTutup(h, 'simpanNominalInfaq', [{ nominal: nominal, bulan: Number(fBulan.value), tahun: Number(fTahun.value) }], muatPengaturan);
+        }
+      }
+    ]);
+  }
+
+  HALAMAN.pengaturan = renderPengaturan;
+</script>
